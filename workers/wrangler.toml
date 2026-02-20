@@ -1,0 +1,10 @@
+name = "procurement-worker"
+main = "upload.js"
+compatibility_date = "2024-01-01"
+
+[[r1_buckets]]
+binding = "R2_BUCKET"
+bucket_name = "procurement-images"
+
+# Environment variables (set in Cloudflare dashboard)
+# R2_BUCKET: Your R2 bucket name
