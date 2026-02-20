@@ -59,7 +59,7 @@ async function handleUpload(request, env) {
   const objectKey = `${organization_id}/${Date.now()}-${file_name}`;
 
   // Create presigned URL for upload
-  const uploadUrl = await env.R2_BUCKET.createPresignedUploadUrl(objectKey, {
+  const uploadUrl = await env.procurement_images.createPresignedUploadUrl(objectKey, {
     expiry: 900, // 15 minutes
     contentType: content_type || 'image/jpeg',
   });
@@ -101,7 +101,7 @@ async function handleDownload(request, env) {
   }
 
   // Generate presigned URL for download
-  const downloadUrl = await env.R2_BUCKET.createPresignedGetUrl(storage_path, 60); // 60 seconds
+  const downloadUrl = await env.procurement_images.createPresignedGetUrl(storage_path, 60); // 60 seconds
 
   return new Response(
     JSON.stringify({

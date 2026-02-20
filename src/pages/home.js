@@ -16,8 +16,11 @@ export async function renderHome(container) {
     <div class="min-h-screen bg-gray-50">
       <!-- Header -->
       <header class="bg-white border-b border-gray-200 sticky top-0 z-10">
-        <div class="max-w-lg mx-auto px-4 py-4 flex items-center justify-between">
-          <h1 class="text-lg font-bold text-gray-900">Procurement</h1>
+        <div class="max-w-lg mx-auto px-4 py-3 flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <img src="/128x128@2x.png" alt="Logo" class="w-8 h-8 object-contain">
+            <h1 class="text-lg font-bold text-gray-900">Procurement</h1>
+          </div>
           <div class="flex items-center gap-2">
             ${!appState.isOnline ? `
               <span class="px-2 py-1 bg-yellow-100 text-yellow-800 text-xs rounded-full">

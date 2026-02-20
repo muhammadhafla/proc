@@ -17,6 +17,7 @@ export const config = {
   app: {
     name: 'Procurement System',
     version: '1.0.0',
+    logo: '/128x128@2x.png',
   },
   
   // Upload Configuration
