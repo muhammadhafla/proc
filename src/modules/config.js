@@ -4,7 +4,18 @@
 export const config = {
   // Supabase Configuration
   supabase: {
-    url: import.meta.env.VITE_SUPABASE_URL || 'YOUR_SUPABASE_URL',
+    // The raw env values are read below and normalized to avoid
+    // accidental concatenation issues in production builds.
+    url: (function(){
+      const raw = import.meta.env.VITE_SUPABASE_URL || 'YOUR_SUPABASE_URL';
+      try {
+        const u = new URL(String(raw).trim());
+        return u.origin.replace(/\/+$/,'');
+      } catch (e) {
+        // Fallback: trim whitespace and trailing slashes
+        return String(raw).trim().replace(/\/+$/,'');
+      }
+    })(),
     anonKey: import.meta.env.VITE_SUPABASE_ANON_KEY || 'YOUR_SUPABASE_ANON_KEY',
   },
   

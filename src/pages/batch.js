@@ -14,22 +14,22 @@ export function renderBatch(container) {
     <div class="min-h-screen bg-gray-900 flex flex-col">
       <!-- Header -->
       <header class="bg-gray-800 p-4 flex items-center justify-between">
-        <button id="btn-back" class="p-2 -ml-2 text-white hover:bg-gray-700 rounded-lg">
+        <button id="btn-back" class="p-2 -ml-2 text-white hover:bg-gray-700 rounded-lg" aria-label="Go back">
           <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
           </svg>
         </button>
         <div class="text-center">
           <h1 class="text-white font-semibold">Batch Capture</h1>
-          <p id="batch-count" class="text-gray-400 text-sm">0 items</p>
+          <p id="batch-count" class="text-gray-400 text-sm" aria-live="polite">0 items</p>
         </div>
-        <button id="btn-finish" class="px-4 py-2 bg-green-600 text-white rounded-lg font-medium">
+        <button id="btn-finish" class="px-4 py-2 bg-green-600 text-white rounded-lg font-medium" aria-label="Finish batch capture">
           Finish
         </button>
       </header>
       
       <!-- Supplier Selection (shown initially) -->
-      <div id="supplier-select" class="flex-1 p-4">
+      <div id="supplier-select" class="flex-1 p-4 overflow-y-auto">
         <div class="max-w-lg mx-auto">
           <h2 class="text-white text-lg font-semibold mb-4">Select Supplier</h2>
           <input 
@@ -37,8 +37,9 @@ export function renderBatch(container) {
             id="supplier-input"
             class="input bg-gray-800 border-gray-700 text-white mb-4"
             placeholder="Search or add supplier..."
+            aria-label="Search suppliers"
           >
-          <div id="supplier-list" class="space-y-2 max-h-64 overflow-y-auto"></div>
+          <div id="supplier-list" class="space-y-2 max-h-64 overflow-y-auto" role="listbox" aria-label="Supplier list"></div>
           
           <!-- Add new supplier option -->
           <button id="btn-add-supplier" class="w-full mt-4 p-3 border-2 border-dashed border-gray-600 text-gray-400 rounded-lg hover:border-gray-500 hover:text-gray-300">
@@ -86,15 +87,34 @@ export function renderBatch(container) {
       </div>
       
       <!-- Preview Modal -->
-      <div id="preview-modal" class="hidden fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
+      <div id="preview-modal" class="hidden fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="preview-title">
         <div class="bg-gray-800 rounded-xl max-w-sm w-full overflow-hidden">
-          <img id="preview-image" class="w-full h-48 object-contain bg-black" alt="Preview">
+          <img id="preview-image" class="w-full h-48 object-contain bg-black" alt="Preview of captured item">
           <div class="p-4 space-y-2">
             <p id="preview-supplier" class="text-white font-medium"></p>
             <p id="preview-details" class="text-gray-400 text-sm"></p>
             <div class="flex gap-2 pt-2">
-              <button id="btn-discard" class="btn btn-secondary flex-1">Discard</button>
-              <button id="btn-confirm" class="btn btn-primary flex-1">Confirm</button>
+              <button id="btn-discard" class="btn btn-secondary flex-1" aria-label="Discard this capture">Discard</button>
+              <button id="btn-confirm" class="btn btn-primary flex-1" aria-label="Confirm this capture">Confirm</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Confirm Dialog Modal -->
+      <div id="confirm-modal" class="hidden fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+        <div class="bg-white rounded-xl max-w-sm w-full overflow-hidden">
+          <div class="p-6 text-center">
+            <div class="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <svg class="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+              </svg>
+            </div>
+            <h3 id="confirm-title" class="text-lg font-semibold text-gray-900 mb-2">Discard Items?</h3>
+            <p class="text-gray-600 mb-6">You have <span id="confirm-item-count">0</span> captured items that will be lost.</p>
+            <div class="flex gap-3">
+              <button id="btn-cancel-discard" class="btn btn-secondary flex-1">Cancel</button>
+              <button id="btn-confirm-discard" class="btn btn-danger flex-1">Discard</button>
             </div>
           </div>
         </div>
@@ -109,6 +129,7 @@ export function renderBatch(container) {
 let videoStream = null;
 let selectedSupplier = null;
 let batchItems = [];
+let allSuppliers = []; // Store all suppliers for filtering
 
 /**
  * Initialize batch capture
@@ -122,19 +143,54 @@ async function initBatchCapture() {
   document.getElementById('btn-finish').addEventListener('click', handleFinish);
   document.getElementById('btn-add-supplier').addEventListener('click', handleAddSupplier);
   
+  // Setup supplier search/filter
+  document.getElementById('supplier-input').addEventListener('input', debounce(filterSuppliers, 200));
+  
   // Start camera
   await startCamera();
 }
 
 /**
- * Load suppliers
+ * Debounce helper
  */
-async function loadSuppliers() {
-  const suppliers = await getSuppliers();
+function debounce(fn, delay) {
+  let timeout;
+  return (...args) => {
+    clearTimeout(timeout);
+    timeout = setTimeout(() => fn(...args), delay);
+  };
+}
+
+/**
+ * Filter suppliers based on search input
+ */
+function filterSuppliers() {
+  const searchInput = document.getElementById('supplier-input');
+  const searchTerm = searchInput.value.toLowerCase().trim();
+  const listEl = document.getElementById('supplier-list');
+  
+  if (!searchTerm) {
+    // Show all suppliers if no search term
+    renderSupplierList(allSuppliers);
+    return;
+  }
+  
+  // Filter suppliers by name
+  const filtered = allSuppliers.filter(s => 
+    s.name.toLowerCase().includes(searchTerm)
+  );
+  
+  renderSupplierList(filtered);
+}
+
+/**
+ * Render supplier list
+ */
+function renderSupplierList(suppliers) {
   const listEl = document.getElementById('supplier-list');
   
   if (suppliers.length === 0) {
-    listEl.innerHTML = '<p class="text-gray-500 text-center py-4">No suppliers yet</p>';
+    listEl.innerHTML = '<p class="text-gray-500 text-center py-4">No suppliers found</p>';
     return;
   }
   
@@ -148,6 +204,15 @@ async function loadSuppliers() {
   document.querySelectorAll('.supplier-btn').forEach(btn => {
     btn.addEventListener('click', () => selectSupplier(btn.dataset.id, btn.dataset.name));
   });
+}
+
+/**
+ * Load suppliers
+ */
+async function loadSuppliers() {
+  const suppliers = await getSuppliers();
+  allSuppliers = suppliers; // Store for filtering
+  renderSupplierList(suppliers);
 }
 
 /**
@@ -186,7 +251,14 @@ async function startCamera() {
     
   } catch (error) {
     console.error('Camera error:', error);
-    showNotification('Failed to access camera', 'error');
+    // Provide more helpful error message
+    if (error.name === 'NotAllowedError' || error.message.includes('Permission')) {
+      showNotification('Camera access denied. Please enable camera permissions in your browser settings.', 'error');
+    } else if (error.name === 'NotFoundError') {
+      showNotification('No camera found on this device', 'error');
+    } else {
+      showNotification('Failed to access camera', 'error');
+    }
   }
 }
 
@@ -211,6 +283,12 @@ async function captureImage() {
   
   canvas.width = video.videoWidth;
   canvas.height = video.videoHeight;
+  
+  // Validate video dimensions before processing
+  if (!canvas.width || !canvas.height || canvas.width <= 0 || canvas.height <= 0) {
+    showNotification('Video not ready. Please try capturing again.', 'error');
+    return;
+  }
   
   const ctx = canvas.getContext('2d');
   ctx.drawImage(video, 0, 0);
@@ -247,6 +325,11 @@ function showPreview(blob, data) {
   const supplier = document.getElementById('preview-supplier');
   const details = document.getElementById('preview-details');
   
+  // Revoke previous URL if exists
+  if (img.src && img.src.startsWith('blob:')) {
+    URL.revokeObjectURL(img.src);
+  }
+  
   img.src = URL.createObjectURL(blob);
   supplier.textContent = data.supplier;
   details.textContent = `${data.model} - Rp ${data.price.toLocaleString('id-ID')}`;
@@ -255,6 +338,10 @@ function showPreview(blob, data) {
   
   // Setup modal buttons
   document.getElementById('btn-discard').onclick = () => {
+    // Revoke URL when discarding
+    if (img.src && img.src.startsWith('blob:')) {
+      URL.revokeObjectURL(img.src);
+    }
     modal.classList.add('hidden');
     pendingCapture = null;
     document.getElementById('price-input').value = '';
@@ -303,10 +390,22 @@ async function confirmCapture() {
  */
 function handleBack() {
   if (batchItems.length > 0) {
-    if (confirm('Discard all captured items?')) {
+    // Show custom confirmation modal
+    const modal = document.getElementById('confirm-modal');
+    document.getElementById('confirm-item-count').textContent = batchItems.length;
+    modal.classList.remove('hidden');
+    
+    // Setup modal buttons
+    document.getElementById('btn-cancel-discard').onclick = () => {
+      modal.classList.add('hidden');
+    };
+    
+    document.getElementById('btn-confirm-discard').onclick = () => {
+      modal.classList.add('hidden');
+      batchItems = [];
       stopCamera();
       router.navigate('home');
-    }
+    };
   } else {
     stopCamera();
     router.navigate('home');
@@ -354,7 +453,7 @@ async function handleFinish() {
 /**
  * Handle add supplier
  */
-function handleAddSupplier() {
+async function handleAddSupplier() {
   const input = document.getElementById('supplier-input');
   const name = input.value.trim();
   
@@ -363,15 +462,15 @@ function handleAddSupplier() {
     return;
   }
   
-  // Create supplier locally
-  addSupplier({
+  // Create supplier locally (await to ensure it's added before refreshing list)
+  await addSupplier({
     id: uuidv4(),
     name: name,
     normalized_name: name.toLowerCase().trim(),
   });
   
   // Refresh list
-  loadSuppliers();
+  await loadSuppliers();
   
   input.value = '';
   showNotification('Supplier added', 'success');

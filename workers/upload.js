@@ -7,7 +7,7 @@ export default {
     if (request.method === 'OPTIONS') {
       return new Response(null, {
         headers: {
-          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Origin': process.env.ALLOWED_ORIGIN || '*',
           'Access-Control-Allow-Methods': 'POST, OPTIONS',
           'Access-Control-Allow-Headers': 'Content-Type, Authorization',
         },
@@ -20,13 +20,42 @@ export default {
     }
 
     try {
+      // Verify JWT token from Authorization header
+      const authHeader = request.headers.get('Authorization');
+      if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        return new Response(JSON.stringify({ error: 'Missing or invalid authorization header' }), {
+          status: 401,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      const token = authHeader.replace('Bearer ', '');
+      
+      // Verify the token with Supabase
+      const user = await verifySupabaseToken(token, env);
+      if (!user) {
+        return new Response(JSON.stringify({ error: 'Invalid or expired token' }), {
+          status: 401,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      // Get user's organization_id from JWT claims
+      const organizationId = user.organization_id;
+      if (!organizationId) {
+        return new Response(JSON.stringify({ error: 'User has no organization' }), {
+          status: 403,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
       const url = new URL(request.url);
       
       // Route based on path
       if (url.pathname === '/upload') {
-        return handleUpload(request, env);
+        return handleUpload(request, env, organizationId);
       } else if (url.pathname === '/download') {
-        return handleDownload(request, env);
+        return handleDownload(request, env, organizationId);
       } else {
         return new Response('Not found', { status: 404 });
       }
@@ -39,9 +68,33 @@ export default {
   },
 };
 
+// ==================== JWT Verification ====================
+
+async function verifySupabaseToken(token, env) {
+  try {
+    // Verify token with Supabase
+    const response = await fetch(`${env.SUPABASE_URL}/auth/v1/user`, {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'apikey': env.SUPABASE_ANON_KEY,
+      },
+    });
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const user = await response.json();
+    return user;
+  } catch (error) {
+    console.error('Token verification failed:', error);
+    return null;
+  }
+}
+
 // ==================== Upload Handler ====================
 
-async function handleUpload(request, env) {
+async function handleUpload(request, env, userOrganizationId) {
   const body = await request.json();
   const { organization_id, file_name, content_type } = body;
 
@@ -52,8 +105,13 @@ async function handleUpload(request, env) {
     );
   }
 
-  // Validate organization (in production, check against database)
-  // For now, we accept any organization_id
+  // SECURITY: Verify user's organization matches the requested organization
+  if (organization_id !== userOrganizationId) {
+    return new Response(
+      JSON.stringify({ error: 'Unauthorized: Organization mismatch' }),
+      { status: 403, headers: { 'Content-Type': 'application/json' } }
+    );
+  }
 
   // Generate unique object key
   const objectKey = `${organization_id}/${Date.now()}-${file_name}`;
@@ -73,7 +131,7 @@ async function handleUpload(request, env) {
     {
       headers: {
         'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Origin': process.env.ALLOWED_ORIGIN || '*',
       },
     }
   );
@@ -81,7 +139,7 @@ async function handleUpload(request, env) {
 
 // ==================== Download Handler ====================
 
-async function handleDownload(request, env) {
+async function handleDownload(request, env, userOrganizationId) {
   const body = await request.json();
   const { storage_path } = body;
 
@@ -100,6 +158,15 @@ async function handleDownload(request, env) {
     );
   }
 
+  // SECURITY: Verify the storage path belongs to the user's organization
+  const pathOrganizationId = storage_path.split('/')[0];
+  if (pathOrganizationId !== userOrganizationId) {
+    return new Response(
+      JSON.stringify({ error: 'Unauthorized: Cannot access other organization files' }),
+      { status: 403, headers: { 'Content-Type': 'application/json' } }
+    );
+  }
+
   // Generate presigned URL for download
   const downloadUrl = await env.procurement_images.createPresignedGetUrl(storage_path, 60); // 60 seconds
 
@@ -111,7 +178,7 @@ async function handleDownload(request, env) {
     {
       headers: {
         'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Origin': process.env.ALLOWED_ORIGIN || '*',
       },
     }
   );

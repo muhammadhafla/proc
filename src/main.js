@@ -1,10 +1,14 @@
 // Procurement System - Main Entry Point
 import { initApp } from './modules/app.js';
 import { initDB } from './modules/db.js';
+import { initTheme } from './modules/theme.js';
 
 // Initialize application
 async function bootstrap() {
   try {
+    // Initialize theme first (before any UI renders)
+    initTheme();
+    
     // Initialize IndexedDB first (offline-first)
     await initDB();
     

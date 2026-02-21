@@ -1,8 +1,8 @@
 // Detail Page - View procurement details
 import { router } from '../modules/router.js';
 import { getProcurement } from '../modules/db.js';
-import { getProcurementDetails, getSignedDownloadUrl } from '../modules/api.js';
-import { formatCurrency, formatDate } from '../modules/app.js';
+import { getProcurementDetails, getSignedDownloadUrl, updateProcurement, getAuditLogs, createAuditLog, getUserRole } from '../modules/api.js';
+import { formatCurrency, formatDate, showNotification } from '../modules/app.js';
 import { appState } from '../modules/app.js';
 
 /**
@@ -16,19 +16,23 @@ export async function renderDetail(container, params) {
       <!-- Header -->
       <header class="bg-white border-b border-gray-200 sticky top-0 z-10">
         <div class="max-w-lg mx-auto px-4 py-4 flex items-center justify-between">
-          <button id="btn-back" class="p-2 -ml-2 hover:bg-gray-100 rounded-lg">
+          <button id="btn-back" class="p-2 -ml-2 hover:bg-gray-100 rounded-lg" aria-label="Go back">
             <svg class="w-6 h-6 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
             </svg>
           </button>
           <h1 class="text-lg font-bold text-gray-900">Details</h1>
-          <div class="w-10"></div>
+          <button id="btn-edit" class="p-2 -mr-2 hover:bg-gray-100 rounded-lg hidden" aria-label="Edit">
+            <svg class="w-6 h-6 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
+            </svg>
+          </button>
         </div>
       </header>
       
       <!-- Content -->
-      <main id="detail-content" class="max-w-lg mx-auto p-4">
-        <div class="text-center py-8">
+      <main id="detail-content" class="max-w-lg mx-auto p-4 pb-20">
+        <div class="text-center py-8" aria-live="polite">
           <div class="animate-spin w-8 h-8 border-4 border-primary-500 border-t-transparent rounded-full mx-auto"></div>
           <p class="text-gray-500 mt-2">Loading...</p>
         </div>
@@ -36,8 +40,8 @@ export async function renderDetail(container, params) {
     </div>
   `;
   
-  // Setup back button
-  document.getElementById('btn-back').addEventListener('click', () => router.navigate('list'));
+  // Setup back button - use navigateBack to return to previous page
+  document.getElementById('btn-back').addEventListener('click', () => router.navigateBack('list'));
   
   // Load detail
   await loadDetail(id);
@@ -48,14 +52,22 @@ export async function renderDetail(container, params) {
  */
 async function loadDetail(id) {
   const contentEl = document.getElementById('detail-content');
+  const editBtn = document.getElementById('btn-edit');
   
   try {
     let procurement = null;
+    let auditLogs = [];
     
     // Try server first
     if (appState.isOnline) {
       try {
         procurement = await getProcurementDetails(id);
+        // Fetch audit logs
+        try {
+          auditLogs = await getAuditLogs(id);
+        } catch (e) {
+          console.log('Failed to fetch audit logs');
+        }
       } catch (e) {
         console.log('Server fetch failed');
       }
@@ -73,6 +85,23 @@ async function loadDetail(id) {
         </div>
       `;
       return;
+    }
+    
+    // Check if user can edit (manager or owner)
+    let userRole = null;
+    if (appState.isOnline) {
+      try {
+        userRole = await getUserRole();
+      } catch (e) {
+        console.log('Failed to get user role');
+      }
+    }
+    const canEdit = userRole === 'owner' || userRole === 'manager';
+    
+    // Show edit button if user can edit
+    if (canEdit) {
+      editBtn.classList.remove('hidden');
+      editBtn.addEventListener('click', () => showCorrectionModal(procurement));
     }
     
     // Get image URL
@@ -164,6 +193,28 @@ async function loadDetail(id) {
           </span>
         </div>
       </div>
+      
+      <!-- Audit Trail -->
+      ${auditLogs.length > 0 ? `
+        <div class="card mt-4">
+          <h3 class="font-semibold text-gray-900 mb-3">Correction History</h3>
+          <div class="space-y-3">
+            ${auditLogs.map(log => `
+              <div class="border-l-2 border-primary-300 pl-3 py-1">
+                <div class="text-sm text-gray-500">
+                  ${formatDate(log.created_at)}
+                </div>
+                <div class="text-sm">
+                  ${log.action === 'correction' ? 'Correction' : log.action}: 
+                  ${log.old_values?.price ? `${formatCurrency(log.old_values.price)} → ${formatCurrency(log.new_values?.price)}` : ''}
+                  ${log.old_values?.quantity ? ` (Qty: ${log.old_values.quantity} → ${log.new_values?.quantity})` : ''}
+                </div>
+                ${log.reason ? `<div class="text-xs text-gray-500 mt-1">"${log.reason}"</div>` : ''}
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      ` : ''}
     `;
     
   } catch (error) {
@@ -188,4 +239,134 @@ function getStatusClass(status) {
     default:
       return 'status-success';
   }
+}
+
+/**
+ * Show correction modal
+ */
+function showCorrectionModal(procurement) {
+  const modal = document.createElement('div');
+  modal.id = 'correction-modal';
+  modal.className = 'fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4';
+  modal.innerHTML = `
+    <div class="bg-white rounded-xl max-w-md w-full p-6 shadow-xl">
+      <h2 class="text-xl font-bold text-gray-900 mb-4">Correct Price/Quantity</h2>
+      
+      <form id="correction-form" class="space-y-4">
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Price (IDR)</label>
+          <input 
+            type="number" 
+            id="input-price" 
+            value="${procurement.price}"
+            min="1" 
+            step="1"
+            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+            required
+          >
+        </div>
+        
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Quantity</label>
+          <input 
+            type="number" 
+            id="input-quantity" 
+            value="${procurement.quantity || 1}"
+            min="1" 
+            step="1"
+            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+            required
+          >
+        </div>
+        
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Reason for correction</label>
+          <textarea 
+            id="input-reason" 
+            rows="3"
+            placeholder="e.g., Price was entered incorrectly"
+            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+          ></textarea>
+        </div>
+        
+        <div class="flex gap-3 pt-2">
+          <button 
+            type="button" 
+            id="btn-cancel"
+            class="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+          >
+            Cancel
+          </button>
+          <button 
+            type="submit" 
+            id="btn-save"
+            class="flex-1 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors"
+          >
+            Save
+          </button>
+        </div>
+      </form>
+    </div>
+  `;
+  
+  document.body.appendChild(modal);
+  
+  // Close modal handlers
+  const closeModal = () => {
+    modal.remove();
+  };
+  
+  document.getElementById('btn-cancel').addEventListener('click', closeModal);
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) closeModal();
+  });
+  
+  // Form submission
+  document.getElementById('correction-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    
+    const price = parseFloat(document.getElementById('input-price').value);
+    const quantity = parseInt(document.getElementById('input-quantity').value);
+    const reason = document.getElementById('input-reason').value.trim();
+    
+    if (price === procurement.price && quantity === (procurement.quantity || 1)) {
+      showNotification('No changes to save', 'warning');
+      closeModal();
+      return;
+    }
+    
+    const saveBtn = document.getElementById('btn-save');
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Saving...';
+    
+    try {
+      // Update procurement
+      await updateProcurement(procurement.id, { price, quantity });
+      
+      // Create audit log
+      await createAuditLog({
+        organization_id: procurement.organization_id,
+        user_id: appState.user?.id,
+        table_name: 'procurement',
+        record_id: procurement.id,
+        action: 'correction',
+        old_values: { price: procurement.price, quantity: procurement.quantity || 1 },
+        new_values: { price, quantity },
+        reason: reason || null
+      });
+      
+      showNotification('Correction saved successfully', 'success');
+      closeModal();
+      
+      // Reload detail
+      await loadDetail(procurement.id);
+      
+    } catch (error) {
+      console.error('Error saving correction:', error);
+      showNotification('Failed to save correction', 'error');
+    } finally {
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Save';
+    }
+  });
 }

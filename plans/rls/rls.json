@@ -1,0 +1,252 @@
+[
+  {
+    "policy_name": "org_delete_owner_or_super",
+    "table_name": "organizations",
+    "command": "d",
+    "polroles": [
+      16481
+    ],
+    "using_expr": "((get_user_role_in_org(id) = 'owner'::text) OR ((auth.jwt() ->> 'user_role'::text) = 'super_admin'::text))",
+    "check_expr": null
+  },
+  {
+    "policy_name": "org_insert_owner_or_super",
+    "table_name": "organizations",
+    "command": "a",
+    "polroles": [
+      16481
+    ],
+    "using_expr": null,
+    "check_expr": "((get_user_role_in_org(id) = 'owner'::text) OR ((auth.jwt() ->> 'user_role'::text) = 'super_admin'::text))"
+  },
+  {
+    "policy_name": "org_select_same_org",
+    "table_name": "organizations",
+    "command": "r",
+    "polroles": [
+      16481
+    ],
+    "using_expr": "((((auth.jwt() ->> 'organization_id'::text))::uuid = id) OR (EXISTS ( SELECT 1\n   FROM users u\n  WHERE ((u.id = auth.uid()) AND (u.organization_id = organizations.id)))))",
+    "check_expr": null
+  },
+  {
+    "policy_name": "org_update_owner_or_super",
+    "table_name": "organizations",
+    "command": "w",
+    "polroles": [
+      16481
+    ],
+    "using_expr": "((get_user_role_in_org(id) = 'owner'::text) OR ((auth.jwt() ->> 'user_role'::text) = 'super_admin'::text))",
+    "check_expr": "((get_user_role_in_org(id) = 'owner'::text) OR ((auth.jwt() ->> 'user_role'::text) = 'super_admin'::text))"
+  },
+  {
+    "policy_name": "users_delete_own",
+    "table_name": "users",
+    "command": "d",
+    "polroles": [
+      16481
+    ],
+    "using_expr": "((id = ( SELECT auth.uid() AS uid)) AND (organization_id = ((auth.jwt() ->> 'organization_id'::text))::uuid))",
+    "check_expr": null
+  },
+  {
+    "policy_name": "users_insert_same_org",
+    "table_name": "users",
+    "command": "a",
+    "polroles": [
+      16481
+    ],
+    "using_expr": null,
+    "check_expr": "((organization_id = ((auth.jwt() ->> 'organization_id'::text))::uuid) AND (id = ( SELECT auth.uid() AS uid)))"
+  },
+  {
+    "policy_name": "users_select_same_org",
+    "table_name": "users",
+    "command": "r",
+    "polroles": [
+      16481
+    ],
+    "using_expr": "((organization_id = ((auth.jwt() ->> 'organization_id'::text))::uuid) OR (id = ( SELECT auth.uid() AS uid)))",
+    "check_expr": null
+  },
+  {
+    "policy_name": "users_update_own",
+    "table_name": "users",
+    "command": "w",
+    "polroles": [
+      16481
+    ],
+    "using_expr": "((id = ( SELECT auth.uid() AS uid)) AND (organization_id = ((auth.jwt() ->> 'organization_id'::text))::uuid))",
+    "check_expr": "((id = ( SELECT auth.uid() AS uid)) AND (organization_id = ((auth.jwt() ->> 'organization_id'::text))::uuid))"
+  },
+  {
+    "policy_name": "suppliers_delete_same_org",
+    "table_name": "suppliers",
+    "command": "d",
+    "polroles": [
+      16481
+    ],
+    "using_expr": "(organization_id = ((auth.jwt() ->> 'organization_id'::text))::uuid)",
+    "check_expr": null
+  },
+  {
+    "policy_name": "suppliers_insert_same_org",
+    "table_name": "suppliers",
+    "command": "a",
+    "polroles": [
+      16481
+    ],
+    "using_expr": null,
+    "check_expr": "(organization_id = ((auth.jwt() ->> 'organization_id'::text))::uuid)"
+  },
+  {
+    "policy_name": "suppliers_select_same_org",
+    "table_name": "suppliers",
+    "command": "r",
+    "polroles": [
+      16481
+    ],
+    "using_expr": "(organization_id = ((auth.jwt() ->> 'organization_id'::text))::uuid)",
+    "check_expr": null
+  },
+  {
+    "policy_name": "suppliers_update_same_org",
+    "table_name": "suppliers",
+    "command": "w",
+    "polroles": [
+      16481
+    ],
+    "using_expr": "(organization_id = ((auth.jwt() ->> 'organization_id'::text))::uuid)",
+    "check_expr": "(organization_id = ((auth.jwt() ->> 'organization_id'::text))::uuid)"
+  },
+  {
+    "policy_name": "models_delete_same_org",
+    "table_name": "models",
+    "command": "d",
+    "polroles": [
+      16481
+    ],
+    "using_expr": "(organization_id = ((auth.jwt() ->> 'organization_id'::text))::uuid)",
+    "check_expr": null
+  },
+  {
+    "policy_name": "models_insert_same_org",
+    "table_name": "models",
+    "command": "a",
+    "polroles": [
+      16481
+    ],
+    "using_expr": null,
+    "check_expr": "(organization_id = ((auth.jwt() ->> 'organization_id'::text))::uuid)"
+  },
+  {
+    "policy_name": "models_select_same_org",
+    "table_name": "models",
+    "command": "r",
+    "polroles": [
+      16481
+    ],
+    "using_expr": "(organization_id = ((auth.jwt() ->> 'organization_id'::text))::uuid)",
+    "check_expr": null
+  },
+  {
+    "policy_name": "models_update_same_org",
+    "table_name": "models",
+    "command": "w",
+    "polroles": [
+      16481
+    ],
+    "using_expr": "(organization_id = ((auth.jwt() ->> 'organization_id'::text))::uuid)",
+    "check_expr": "(organization_id = ((auth.jwt() ->> 'organization_id'::text))::uuid)"
+  },
+  {
+    "policy_name": "procurement_insert_same_org",
+    "table_name": "procurement",
+    "command": "a",
+    "polroles": [
+      16481
+    ],
+    "using_expr": null,
+    "check_expr": "(organization_id = ((auth.jwt() ->> 'organization_id'::text))::uuid)"
+  },
+  {
+    "policy_name": "procurement_no_delete",
+    "table_name": "procurement",
+    "command": "d",
+    "polroles": [
+      16481
+    ],
+    "using_expr": "false",
+    "check_expr": null
+  },
+  {
+    "policy_name": "procurement_no_update",
+    "table_name": "procurement",
+    "command": "w",
+    "polroles": [
+      16481
+    ],
+    "using_expr": "false",
+    "check_expr": null
+  },
+  {
+    "policy_name": "procurement_select_same_org",
+    "table_name": "procurement",
+    "command": "r",
+    "polroles": [
+      16481
+    ],
+    "using_expr": "(organization_id = ((auth.jwt() ->> 'organization_id'::text))::uuid)",
+    "check_expr": null
+  },
+  {
+    "policy_name": "delete_by_service_only",
+    "table_name": "procurement_images",
+    "command": "d",
+    "polroles": [
+      0
+    ],
+    "using_expr": "false",
+    "check_expr": null
+  },
+  {
+    "policy_name": "insert own images",
+    "table_name": "procurement_images",
+    "command": "a",
+    "polroles": [
+      0
+    ],
+    "using_expr": null,
+    "check_expr": "(organization_id = ((auth.jwt() ->> 'organization_id'::text))::uuid)"
+  },
+  {
+    "policy_name": "select own images",
+    "table_name": "procurement_images",
+    "command": "r",
+    "polroles": [
+      0
+    ],
+    "using_expr": "((organization_id = ((auth.jwt() ->> 'organization_id'::text))::uuid) AND (archived = false))",
+    "check_expr": null
+  },
+  {
+    "policy_name": "update_by_service_only",
+    "table_name": "procurement_images",
+    "command": "w",
+    "polroles": [
+      0
+    ],
+    "using_expr": "false",
+    "check_expr": "false"
+  },
+  {
+    "policy_name": "update_last_accessed",
+    "table_name": "procurement_images",
+    "command": "w",
+    "polroles": [
+      16481
+    ],
+    "using_expr": "(organization_id = ((auth.jwt() ->> 'organization_id'::text))::uuid)",
+    "check_expr": "((organization_id = ((auth.jwt() ->> 'organization_id'::text))::uuid) AND (last_accessed_at IS NOT NULL) AND (NOT (storage_path IS DISTINCT FROM storage_path)))"
+  }
+]

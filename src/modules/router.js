@@ -2,7 +2,6 @@
 import { renderLogin } from '../pages/login.js';
 import { renderHome } from '../pages/home.js';
 import { renderCapture } from '../pages/capture.js';
-import { renderBatch } from '../pages/batch.js';
 import { renderList } from '../pages/list.js';
 import { renderDetail } from '../pages/detail.js';
 
@@ -21,7 +20,7 @@ const routes = {
     requiresAuth: true,
   },
   batch: {
-    render: renderBatch,
+    render: renderCapture, // Unified capture page (previously separate batch.js)
     requiresAuth: true,
   },
   list: {
@@ -37,6 +36,9 @@ const routes = {
 // Current route
 let currentRoute = null;
 
+// Store previous route for back navigation
+let previousRoute = null;
+
 /**
  * Navigate to a route
  */
@@ -47,11 +49,20 @@ export function navigate(routeName, params = {}) {
     return;
   }
   
+  // Store previous route for back navigation
+  if (currentRoute && currentRoute !== routeName) {
+    previousRoute = currentRoute;
+  }
+  
   // Check authentication
   const appElement = document.getElementById('app');
   const isAuthenticated = !!window.appState?.user;
   
   if (route.requiresAuth && !isAuthenticated) {
+    // Store intended route for redirect after login
+    if (routeName !== 'login') {
+      sessionStorage.setItem('intendedRoute', routeName);
+    }
     navigate('login');
     return;
   }
@@ -62,6 +73,19 @@ export function navigate(routeName, params = {}) {
   
   // Update URL (optional - for PWA without full routing)
   window.history.pushState({ route: routeName, params }, '', `#${routeName}`);
+}
+
+/**
+ * Navigate back to previous route
+ */
+export function navigateBack(defaultRoute = 'home') {
+  if (previousRoute) {
+    const route = previousRoute;
+    previousRoute = null;
+    navigate(route);
+  } else {
+    navigate(defaultRoute);
+  }
 }
 
 /**
@@ -97,5 +121,9 @@ export function initRouter() {
 // Export router
 export const router = {
   navigate,
+  navigateBack,
   getCurrentRoute,
 };
+
+// Export routes for use in app.js
+export { routes };

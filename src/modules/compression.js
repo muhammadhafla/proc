@@ -11,21 +11,27 @@ export async function compressImage(source, options = {}) {
     format = 'jpeg',
   } = options;
   
+  // Get dimensions from source
+  let width = source.width || source.videoWidth;
+  let height = source.height || source.videoHeight;
+  
+  // Validate source has valid dimensions
+  if (!width || !height || width <= 0 || height <= 0) {
+    console.error('Invalid source dimensions:', { width, height, sourceType: source.tagName });
+    throw new Error('Invalid source image: dimensions are zero or undefined');
+  }
+  
   // Create canvas
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d');
-  
-  // Calculate new dimensions
-  let width = source.width || source.videoWidth;
-  let height = source.height || source.videoHeight;
   
   if (width > maxWidth) {
     height = (height * maxWidth) / width;
     width = maxWidth;
   }
   
-  canvas.width = width;
-  canvas.height = height;
+  canvas.width = Math.round(width);
+  canvas.height = Math.round(height);
   
   // Draw scaled image
   ctx.drawImage(source, 0, 0, width, height);
@@ -58,6 +64,13 @@ export async function resizeImage(file, maxWidth, maxHeight) {
     img.onload = async () => {
       let width = img.width;
       let height = img.height;
+      
+      // Validate image has valid dimensions
+      if (!width || !height || width <= 0 || height <= 0) {
+        URL.revokeObjectURL(objectUrl);
+        reject(new Error('Invalid image: dimensions are zero or undefined'));
+        return;
+      }
       
       // Calculate new dimensions
       if (width > maxWidth) {
@@ -103,16 +116,26 @@ export async function resizeImage(file, maxWidth, maxHeight) {
 export function getImageDimensions(file) {
   return new Promise((resolve, reject) => {
     const img = new Image();
+    const objectUrl = URL.createObjectURL(file);
     
     img.onload = () => {
+      if (!img.width || !img.height || img.width <= 0 || img.height <= 0) {
+        URL.revokeObjectURL(objectUrl);
+        reject(new Error('Invalid image: dimensions are zero or undefined'));
+        return;
+      }
       resolve({
         width: img.width,
         height: img.height,
       });
-      URL.revokeObjectURL(img.src);
+      URL.revokeObjectURL(objectUrl);
     };
     
-    img.onerror = () => reject(new Error('Failed to load image'));
-    img.src = URL.createObjectURL(file);
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error('Failed to load image'));
+    };
+    
+    img.src = objectUrl;
   });
 }

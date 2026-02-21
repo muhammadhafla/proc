@@ -6,5 +6,11 @@ compatibility_date = "2024-01-01"
 binding = "procurement_images"
 bucket_name = "procurement-images"
 
-# Environment variables (set in Cloudflare dashboard)
+# Secrets (set via wrangler secret put):
+# npx wrangler secret put SUPABASE_URL
+# npx wrangler secret put SUPABASE_ANON_KEY  
+# npx wrangler secret put ALLOWED_ORIGIN
+
+# Environment variables
+[vars]
 # R2_BUCKET: Your R2 bucket name

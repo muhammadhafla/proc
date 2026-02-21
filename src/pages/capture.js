@@ -1,13 +1,14 @@
-// Single Capture Page
+// Unified Capture Page - Combines single capture and batch capture
 import { router } from '../modules/router.js';
-import { addToQueue, addSupplier, addModel, saveProcurement, getSuppliers } from '../modules/db.js';
+import { addToQueue, addSupplier, addModel, saveProcurement, getSuppliers, getModels } from '../modules/db.js';
 import { createSupplier, createModel } from '../modules/api.js';
-import { showNotification, formatCurrency } from '../modules/app.js';
+import { showNotification } from '../modules/app.js';
 import { compressImage } from '../modules/compression.js';
 import { v4 as uuidv4 } from 'uuid';
 
 /**
- * Render capture page
+ * Render unified capture page
+ * Combines single capture and batch capture in one flow
  */
 export function renderCapture(container) {
   container.innerHTML = `
@@ -20,7 +21,14 @@ export function renderCapture(container) {
           </svg>
         </button>
         <h1 class="text-white font-semibold">Capture</h1>
-        <div class="w-10"></div>
+        <div class="flex items-center gap-2">
+          <div id="batch-indicator" class="hidden px-3 py-1 bg-green-600 text-white text-sm font-medium rounded-full">
+            <span id="batch-count">0</span> items
+          </div>
+          <button id="btn-finish" class="hidden px-4 py-2 bg-green-600 text-white rounded-lg font-medium" aria-label="Finish batch capture">
+            Finish
+          </button>
+        </div>
       </header>
       
       <!-- Camera View -->
@@ -28,54 +36,73 @@ export function renderCapture(container) {
         <video id="camera-preview" class="w-full h-full object-cover" autoplay playsinline></video>
         <canvas id="capture-canvas" class="hidden"></canvas>
         
-        <!-- Camera Controls -->
-        <div class="absolute bottom-0 left-0 right-0 p-6 bg-gradient-to-t from-black/70 to-transparent">
-          <div class="flex items-center justify-center gap-8">
-            <!-- Switch Camera -->
-            <button id="btn-switch" class="p-3 bg-gray-800/80 rounded-full text-white hover:bg-gray-700">
-              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
-              </svg>
-            </button>
+        <!-- Quick Input Overlay -->
+        <div class="absolute bottom-0 left-0 right-0 p-4 bg-gray-800/90">
+          <div class="max-w-lg mx-auto space-y-3">
+            <!-- Supplier Input -->
+            <input 
+              type="text" 
+              id="supplier-input"
+              class="input bg-gray-700 border-gray-600 text-white"
+              placeholder="Supplier name"
+              aria-label="Supplier name"
+            >
             
-            <!-- Capture Button -->
-            <button id="btn-capture" class="w-20 h-20 bg-white rounded-full border-4 border-white/30 hover:scale-95 transition-transform">
-              <div class="w-16 h-16 bg-white rounded-full border-2 border-gray-300 mx-auto"></div>
-            </button>
+            <!-- Model Input -->
+            <input 
+              type="text" 
+              id="model-input"
+              class="input bg-gray-700 border-gray-600 text-white"
+              placeholder="Model (optional)"
+              aria-label="Model name"
+            >
             
-            <!-- Placeholder for balance -->
-            <div class="w-12"></div>
+            <!-- Price Input -->
+            <div class="flex gap-2">
+              <input 
+                type="number" 
+                id="price-input"
+                class="input bg-gray-700 border-gray-600 text-white flex-1"
+                placeholder="Price"
+                inputmode="numeric"
+                aria-label="Price"
+              >
+              <button id="btn-capture" class="px-6 bg-white text-gray-900 font-bold rounded-lg" aria-label="Capture photo">
+                CAPTURE
+              </button>
+            </div>
           </div>
         </div>
         
         <!-- Captured Image Preview -->
         <div id="preview-container" class="hidden absolute inset-0 bg-gray-900 flex flex-col">
-          <img id="captured-image" class="w-full h-64 object-contain bg-black" alt="Captured">
+          <img id="captured-image" class="w-full h-48 object-contain bg-black" alt="Captured preview">
           
-          <!-- Form -->
+          <!-- Form (for editing after capture) -->
           <div class="flex-1 bg-gray-800 p-4 space-y-4 overflow-y-auto">
-            <!-- Supplier -->
-            <div>
-              <label class="block text-sm text-gray-400 mb-1">Supplier</label>
-              <input type="text" id="supplier-input" class="input bg-gray-700 border-gray-600 text-white" placeholder="Supplier name">
-            </div>
-            
-            <!-- Model -->
-            <div>
-              <label class="block text-sm text-gray-400 mb-1">Model</label>
-              <input type="text" id="model-input" class="input bg-gray-700 border-gray-600 text-white" placeholder="Product model">
-            </div>
-            
-            <!-- Price -->
-            <div>
-              <label class="block text-sm text-gray-400 mb-1">Price</label>
-              <input type="number" id="price-input" class="input bg-gray-700 border-gray-600 text-white" placeholder="0" inputmode="numeric">
-            </div>
-            
-            <!-- Actions -->
-            <div class="flex gap-3 pt-2">
+            <div class="flex gap-2 pt-2">
               <button id="btn-retake" class="btn btn-secondary flex-1">Retake</button>
-              <button id="btn-save" class="btn btn-primary flex-1">Save</button>
+              <button id="btn-save-done" class="btn btn-primary flex-1">Save & Done</button>
+              <button id="btn-save-continue" class="btn bg-green-600 hover:bg-green-700 text-white flex-1">Save & Continue</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Confirm Dialog Modal (for discard warning) -->
+      <div id="confirm-modal" class="hidden fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+        <div class="bg-white rounded-xl max-w-sm w-full overflow-hidden">
+          <div class="p-6 text-center">
+            <div class="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <svg class="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+              </svg>
+            </div>
+            <h3 id="confirm-title" class="text-lg font-semibold text-gray-900 mb-2">Discard Items?</h3>
+            <p class="text-gray-600 mb-6">You have <span id="confirm-item-count">0</span> captured items that will be lost.</p>
+            <div class="flex gap-3">
+              <button id="btn-cancel-discard" class="btn btn-secondary flex-1">Cancel</button>
+              <button id="btn-confirm-discard" class="btn btn-danger flex-1">Discard</button>
             </div>
           </div>
         </div>
@@ -87,15 +114,20 @@ export function renderCapture(container) {
   initCamera();
   
   // Setup event listeners
-  document.getElementById('btn-back').addEventListener('click', () => router.navigate('home'));
+  document.getElementById('btn-back').addEventListener('click', handleBack);
+  document.getElementById('btn-finish').addEventListener('click', () => finishBatch());
   document.getElementById('btn-capture').addEventListener('click', captureImage);
   document.getElementById('btn-retake').addEventListener('click', retakeImage);
-  document.getElementById('btn-save').addEventListener('click', saveCapture);
+  document.getElementById('btn-save-done').addEventListener('click', () => saveCapture(false));
+  document.getElementById('btn-save-continue').addEventListener('click', () => saveCapture(true));
 }
 
+// Module-level state
 let videoStream = null;
 let currentFacingMode = 'environment';
 let capturedBlob = null;
+let pendingData = null; // Store supplier/model/price for capture-then-edit flow
+let batchItems = []; // Store items for batch mode
 
 /**
  * Initialize camera
@@ -118,7 +150,42 @@ async function initCamera() {
     
   } catch (error) {
     console.error('Camera error:', error);
-    showNotification('Failed to access camera', 'error');
+    // Provide more helpful error message
+    if (error.name === 'NotAllowedError' || error.message.includes('Permission')) {
+      showNotification('Camera access denied. Please enable camera permissions in your browser settings.', 'error');
+    } else if (error.name === 'NotFoundError') {
+      showNotification('No camera found on this device', 'error');
+    } else {
+      showNotification('Failed to access camera', 'error');
+    }
+  }
+}
+
+/**
+ * Stop camera
+ */
+function stopCamera() {
+  if (videoStream) {
+    videoStream.getTracks().forEach(track => track.stop());
+    videoStream = null;
+  }
+}
+
+/**
+ * Update batch counter UI
+ */
+function updateBatchIndicator() {
+  const indicator = document.getElementById('batch-indicator');
+  const countEl = document.getElementById('batch-count');
+  const finishBtn = document.getElementById('btn-finish');
+  
+  if (batchItems.length > 0) {
+    indicator.classList.remove('hidden');
+    countEl.textContent = batchItems.length;
+    finishBtn.classList.remove('hidden');
+  } else {
+    indicator.classList.add('hidden');
+    finishBtn.classList.add('hidden');
   }
 }
 
@@ -126,6 +193,27 @@ async function initCamera() {
  * Capture image
  */
 async function captureImage() {
+  const supplierInput = document.getElementById('supplier-input');
+  const modelInput = document.getElementById('model-input');
+  const priceInput = document.getElementById('price-input');
+  
+  const supplier = supplierInput.value.trim();
+  const model = modelInput.value.trim();
+  const price = parseInt(priceInput.value, 10);
+  
+  // Validation - done BEFORE capture
+  if (!supplier) {
+    showNotification('Please enter supplier name', 'error');
+    supplierInput.focus();
+    return;
+  }
+  
+  if (!price || price <= 0) {
+    showNotification('Please enter a valid price', 'error');
+    priceInput.focus();
+    return;
+  }
+  
   const video = document.getElementById('camera-preview');
   const canvas = document.getElementById('capture-canvas');
   const previewContainer = document.getElementById('preview-container');
@@ -134,6 +222,12 @@ async function captureImage() {
   // Set canvas dimensions
   canvas.width = video.videoWidth;
   canvas.height = video.videoHeight;
+  
+  // Validate video dimensions before processing
+  if (!canvas.width || !canvas.height || canvas.width <= 0 || canvas.height <= 0) {
+    showNotification('Video not ready. Please try capturing again.', 'error');
+    return;
+  }
   
   // Draw video frame to canvas
   const ctx = canvas.getContext('2d');
@@ -147,14 +241,18 @@ async function captureImage() {
       format: 'jpeg',
     });
     
-    // Show preview
+    // Store data for saving later
+    pendingData = { supplier, model, price };
+    
+    // Show preview with stored data
     const imageUrl = URL.createObjectURL(capturedBlob);
     capturedImage.src = imageUrl;
     previewContainer.classList.remove('hidden');
     
-    // Stop camera
+    // Stop camera to save battery
     if (videoStream) {
       videoStream.getTracks().forEach(track => track.stop());
+      videoStream = null;
     }
     
   } catch (error) {
@@ -168,39 +266,54 @@ async function captureImage() {
  */
 function retakeImage() {
   const previewContainer = document.getElementById('preview-container');
+  const capturedImage = document.getElementById('captured-image');
+  
+  // Revoke object URL to prevent memory leak
+  if (capturedImage.src && capturedImage.src.startsWith('blob:')) {
+    URL.revokeObjectURL(capturedImage.src);
+  }
+  
   previewContainer.classList.add('hidden');
   capturedBlob = null;
+  pendingData = null;
   
   // Restart camera
   initCamera();
 }
 
 /**
- * Save capture
+ * Save capture - single or batch
+ * @param {boolean} continueBatch - If true, add to batch and continue capturing
  */
-async function saveCapture() {
+async function saveCapture(continueBatch = false) {
+  // Use pending data from capture (or current input values)
   const supplierInput = document.getElementById('supplier-input');
   const modelInput = document.getElementById('model-input');
   const priceInput = document.getElementById('price-input');
   
-  const supplier = supplierInput.value.trim();
-  const model = modelInput.value.trim();
-  const price = parseInt(priceInput.value, 10);
+  const supplier = pendingData?.supplier || supplierInput.value.trim();
+  const model = pendingData?.model || modelInput.value.trim();
+  const price = pendingData?.price || parseInt(priceInput.value, 10);
   
   // Validation
   if (!supplier) {
     showNotification('Please enter supplier name', 'error');
+    supplierInput.focus();
     return;
   }
   
   if (!price || price <= 0) {
     showNotification('Please enter a valid price', 'error');
+    priceInput.focus();
     return;
   }
   
-  const saveBtn = document.getElementById('btn-save');
+  const saveBtn = document.getElementById('btn-save-done');
+  const continueBtn = document.getElementById('btn-save-continue');
   saveBtn.disabled = true;
+  continueBtn.disabled = true;
   saveBtn.textContent = 'Saving...';
+  continueBtn.textContent = 'Saving...';
   
   try {
     // Get or create supplier
@@ -261,8 +374,8 @@ async function saveCapture() {
       }
     }
     
-    // Create local procurement record
-    const procurement = await saveProcurement({
+    // Create item data
+    const itemData = {
       id: uuidv4(),
       supplier_id: supplierId,
       supplier_name: supplier,
@@ -272,30 +385,150 @@ async function saveCapture() {
       quantity: 1,
       captured_at: new Date().toISOString(),
       status: 'pending',
-    });
+    };
     
-    // Add to upload queue
-    await addToQueue({
-      requestId: procurement.id,
-      imageBlob: capturedBlob,
-      supplierId,
-      supplierName: supplier,
-      modelId,
-      modelName: model,
-      price,
-      quantity: 1,
-    });
-    
-    showNotification('Saved! Will sync when online.', 'success');
-    
-    // Navigate back to home
-    router.navigate('home');
+    if (continueBatch) {
+      // Add to batch instead of saving immediately
+      batchItems.push({
+        ...itemData,
+        blob: capturedBlob,
+        supplierId,
+        modelId,
+      });
+      
+      // Update batch indicator
+      updateBatchIndicator();
+      
+      // Reset preview and continue
+      const previewContainer = document.getElementById('preview-container');
+      const capturedImage = document.getElementById('captured-image');
+      
+      if (capturedImage.src && capturedImage.src.startsWith('blob:')) {
+        URL.revokeObjectURL(capturedImage.src);
+      }
+      
+      previewContainer.classList.add('hidden');
+      capturedBlob = null;
+      pendingData = null;
+      
+      // Clear inputs for next capture
+      document.getElementById('model-input').value = '';
+      document.getElementById('price-input').value = '';
+      // Keep supplier for convenience in batch mode
+      // document.getElementById('supplier-input').value = '';
+      
+      // Restart camera
+      initCamera();
+      
+      showNotification('Item added to batch', 'success');
+      
+    } else {
+      // Single save - save immediately
+      const procurement = await saveProcurement(itemData);
+      
+      // Add to upload queue
+      await addToQueue({
+        requestId: procurement.id,
+        imageBlob: capturedBlob,
+        supplierId,
+        supplierName: supplier,
+        modelId,
+        modelName: model,
+        price,
+        quantity: 1,
+      });
+      
+      showNotification('Saved! Will sync when online.', 'success');
+      
+      // Navigate back to home
+      stopCamera();
+      router.navigate('home');
+    }
     
   } catch (error) {
     console.error('Save error:', error);
     showNotification('Failed to save', 'error');
   } finally {
     saveBtn.disabled = false;
-    saveBtn.textContent = 'Save';
+    continueBtn.disabled = false;
+    saveBtn.textContent = 'Save & Done';
+    continueBtn.textContent = 'Save & Continue';
   }
+}
+
+/**
+ * Handle back button
+ */
+function handleBack() {
+  if (batchItems.length > 0) {
+    // Show confirmation modal
+    const modal = document.getElementById('confirm-modal');
+    document.getElementById('confirm-item-count').textContent = batchItems.length;
+    modal.classList.remove('hidden');
+    
+    // Setup modal buttons
+    document.getElementById('btn-cancel-discard').onclick = () => {
+      modal.classList.add('hidden');
+    };
+    
+    document.getElementById('btn-confirm-discard').onclick = () => {
+      modal.classList.add('hidden');
+      batchItems = [];
+      stopCamera();
+      router.navigate('home');
+    };
+  } else {
+    stopCamera();
+    router.navigate('home');
+  }
+}
+
+/**
+ * Finish batch - save all batch items
+ * This can be called from outside (e.g., when user clicks "Finish" in header)
+ */
+export async function finishBatch() {
+  if (batchItems.length === 0) {
+    showNotification('No items in batch', 'warning');
+    return;
+  }
+  
+  // Save all items to queue
+  for (const item of batchItems) {
+    await saveProcurement({
+      id: item.id,
+      supplier_id: item.supplierId,
+      supplier_name: item.supplierName,
+      model_id: item.modelId,
+      model_name: item.modelName,
+      price: item.price,
+      quantity: 1,
+      captured_at: item.captured_at,
+      status: 'pending',
+    });
+    
+    await addToQueue({
+      requestId: item.id,
+      imageBlob: item.blob,
+      supplierId: item.supplierId,
+      supplierName: item.supplierName,
+      modelId: item.modelId,
+      modelName: item.modelName,
+      price: item.price,
+      quantity: 1,
+    });
+  }
+  
+  const count = batchItems.length;
+  batchItems = [];
+  stopCamera();
+  showNotification(`${count} items saved!`, 'success');
+  router.navigate('home');
+}
+
+/**
+ * Get current batch items count
+ */
+export function getBatchCount() {
+  return batchItems.length;
 }

@@ -4,6 +4,7 @@ import { getProcurements, getSuppliers } from '../modules/db.js';
 import { fetchProcurements, fetchSuppliers } from '../modules/api.js';
 import { formatCurrency, formatDate } from '../modules/app.js';
 import { appState } from '../modules/app.js';
+import { renderBottomNav, renderSkeleton, renderEmptyState } from '../modules/theme.js';
 
 /**
  * Render list page
@@ -62,15 +63,20 @@ export async function renderList(container) {
         
         <!-- Empty State -->
         <div id="empty-state" class="text-center py-12 hidden">
-          <svg class="w-16 h-16 text-gray-300 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"/>
-          </svg>
-          <p class="text-gray-500 mt-4">No procurements yet</p>
-          <button id="btn-capture" class="btn btn-primary mt-4">
+          <div class="w-24 h-24 mx-auto mb-4 bg-gray-100 rounded-full flex items-center justify-center">
+            <svg class="w-12 h-12 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"/>
+            </svg>
+          </div>
+          <p class="text-gray-500 mb-4">No procurements yet</p>
+          <button id="btn-capture" class="btn btn-primary">
             Start Capturing
           </button>
         </div>
       </main>
+
+      <!-- Bottom Navigation -->
+      ${renderBottomNav('list')}
     </div>
   `;
   
@@ -90,6 +96,9 @@ async function initList() {
   // Setup event listeners
   document.getElementById('btn-back').addEventListener('click', () => router.navigate('home'));
   document.getElementById('btn-capture')?.addEventListener('click', () => router.navigate('capture'));
+  
+  // Setup bottom navigation
+  setupBottomNav();
   
   // Load filters
   await loadSupplierFilter();
@@ -280,4 +289,16 @@ function debounce(fn, delay) {
     clearTimeout(timeout);
     timeout = setTimeout(() => fn(...args), delay);
   };
+}
+
+/**
+ * Setup bottom navigation
+ */
+function setupBottomNav() {
+  document.querySelectorAll('.nav-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const page = btn.dataset.page;
+      router.navigate(page);
+    });
+  });
 }

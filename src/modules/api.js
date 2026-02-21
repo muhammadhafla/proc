@@ -48,6 +48,28 @@ export function getUser() {
 }
 
 /**
+ * Get current user role in organization
+ */
+export async function getUserRole() {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return null;
+  
+  // Try to get role from metadata first (set by JWT claims)
+  const role = user.user_metadata?.role;
+  if (role) return role;
+  
+  // Fallback: fetch from users table
+  const { data, error } = await supabase
+    .from('users')
+    .select('role')
+    .eq('id', user.id)
+    .single();
+  
+  if (error) return null;
+  return data?.role;
+}
+
+/**
  * Subscribe to auth changes
  */
 export function onAuthStateChange(callback) {
@@ -205,6 +227,53 @@ export async function getProcurementDetails(procurementId) {
   return data;
 }
 
+/**
+ * Update procurement record (correction)
+ */
+export async function updateProcurement(procurementId, updates) {
+  const { data, error } = await supabase
+    .from('procurement')
+    .update(updates)
+    .eq('id', procurementId)
+    .select()
+    .single();
+  
+  if (error) throw error;
+  return data;
+}
+
+/**
+ * Get audit logs for a procurement record
+ */
+export async function getAuditLogs(procurementId) {
+  const { data, error } = await supabase
+    .from('audit_logs')
+    .select(`
+      *,
+      users:user_id(name)
+    `)
+    .eq('table_name', 'procurement')
+    .eq('record_id', procurementId)
+    .order('created_at', { ascending: false });
+  
+  if (error) throw error;
+  return data;
+}
+
+/**
+ * Create audit log entry
+ */
+export async function createAuditLog(auditLog) {
+  const { data, error } = await supabase
+    .from('audit_logs')
+    .insert([auditLog])
+    .select()
+    .single();
+  
+  if (error) throw error;
+  return data;
+}
+
 // ==================== Procurement Images ====================
 
 /**
@@ -227,10 +296,13 @@ export async function createProcurementImage(imageData) {
  * Get signed upload URL from Cloudflare Worker
  */
 export async function getSignedUploadUrl(organizationId, fileName, contentType) {
+  const token = await getAccessToken();
+  
   const response = await fetch(`${config.worker.url}/upload`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`,
     },
     body: JSON.stringify({
       organization_id: organizationId,
@@ -250,10 +322,13 @@ export async function getSignedUploadUrl(organizationId, fileName, contentType) 
  * Get signed download URL from Cloudflare Worker
  */
 export async function getSignedDownloadUrl(storagePath) {
+  const token = await getAccessToken();
+  
   const response = await fetch(`${config.worker.url}/download`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`,
     },
     body: JSON.stringify({
       storage_path: storagePath,
@@ -265,6 +340,14 @@ export async function getSignedDownloadUrl(storagePath) {
   }
   
   return response.json();
+}
+
+/**
+ * Get current access token
+ */
+async function getAccessToken() {
+  const { data: { session } } = await supabase.auth.getSession();
+  return session?.access_token || null;
 }
 
 // ==================== Export ====================
