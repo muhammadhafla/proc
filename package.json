@@ -7,6 +7,9 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
+    "lint": "eslint src --ext .js",
+    "lint:fix": "eslint src --ext .js --fix",
+    "format": "prettier --write src/**/*.js",
     "deploy": "npm run build && npx wrangler pages deploy dist",
     "deploy-worker": "npx wrangler deploy --config workers/wrangler.toml",
     "r2-create": "npx wrangler r2 bucket create procurement-images"
@@ -18,7 +21,9 @@
   },
   "devDependencies": {
     "autoprefixer": "^10.4.0",
+    "eslint": "^8.57.0",
     "postcss": "^8.4.0",
+    "prettier": "^3.2.0",
     "tailwindcss": "^3.4.0",
     "vite": "^5.0.0",
     "wrangler": "^4.67.0"

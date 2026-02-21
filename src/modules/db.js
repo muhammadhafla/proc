@@ -13,7 +13,7 @@ export async function initDB() {
   if (dbPromise) return dbPromise;
   
   dbPromise = openDB(DB_NAME, DB_VERSION, {
-    upgrade(db, oldVersion, newVersion, transaction) {
+    upgrade(db, _oldVersion, _newVersion, _transaction) {
       // Store for pending uploads (queue)
       if (!db.objectStoreNames.contains('uploadQueue')) {
         const queueStore = db.createObjectStore('uploadQueue', { 

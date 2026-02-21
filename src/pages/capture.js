@@ -1,10 +1,15 @@
 // Unified Capture Page - Combines single capture and batch capture
 import { router } from '../modules/router.js';
-import { addToQueue, addSupplier, addModel, saveProcurement, getSuppliers, getModels } from '../modules/db.js';
-import { createSupplier, createModel } from '../modules/api.js';
 import { showNotification } from '../modules/app.js';
-import { compressImage } from '../modules/compression.js';
 import { v4 as uuidv4 } from 'uuid';
+import { initCamera, cleanupCamera, stopCamera, captureImage as captureImageFromModule, showPreview, hidePreview, getCurrentFacingMode, revokeAllBlobUrls } from '../modules/camera.js';
+import { getOrCreateSupplier, getOrCreateModel, saveProcurementItem } from '../modules/dataService.js';
+import { saveProcurement, addToQueue } from '../modules/db.js';
+
+// Set up navigation cleanup for blob URLs
+window.addEventListener('hashchange', () => {
+  revokeAllBlobUrls();
+});
 
 /**
  * Render unified capture page
@@ -111,7 +116,7 @@ export function renderCapture(container) {
   `;
   
   // Initialize camera
-  initCamera();
+  initializeCamera();
   
   // Setup event listeners
   document.getElementById('btn-back').addEventListener('click', handleBack);
@@ -123,53 +128,21 @@ export function renderCapture(container) {
 }
 
 // Module-level state
-let videoStream = null;
-let currentFacingMode = 'environment';
 let capturedBlob = null;
 let pendingData = null; // Store supplier/model/price for capture-then-edit flow
 let batchItems = []; // Store items for batch mode
 
 /**
- * Initialize camera
+ * Initialize camera - wrapper that uses shared module
  */
-async function initCamera() {
-  const video = document.getElementById('camera-preview');
-  
+async function initializeCamera() {
   try {
-    videoStream = await navigator.mediaDevices.getUserMedia({
-      video: {
-        facingMode: currentFacingMode,
-        width: { ideal: 1920 },
-        height: { ideal: 1080 },
-      },
-      audio: false,
-    });
-    
-    video.srcObject = videoStream;
-    await video.play();
-    
+    await initCamera({ facingMode: getCurrentFacingMode() });
   } catch (error) {
-    console.error('Camera error:', error);
-    // Provide more helpful error message
-    if (error.name === 'NotAllowedError' || error.message.includes('Permission')) {
-      showNotification('Camera access denied. Please enable camera permissions in your browser settings.', 'error');
-    } else if (error.name === 'NotFoundError') {
-      showNotification('No camera found on this device', 'error');
-    } else {
-      showNotification('Failed to access camera', 'error');
-    }
+    console.error('Camera initialization failed:', error);
   }
 }
 
-/**
- * Stop camera
- */
-function stopCamera() {
-  if (videoStream) {
-    videoStream.getTracks().forEach(track => track.stop());
-    videoStream = null;
-  }
-}
 
 /**
  * Update batch counter UI
@@ -190,7 +163,7 @@ function updateBatchIndicator() {
 }
 
 /**
- * Capture image
+ * Capture image - uses shared camera module
  */
 async function captureImage() {
   const supplierInput = document.getElementById('supplier-input');
@@ -214,50 +187,39 @@ async function captureImage() {
     return;
   }
   
-  const video = document.getElementById('camera-preview');
-  const canvas = document.getElementById('capture-canvas');
-  const previewContainer = document.getElementById('preview-container');
-  const capturedImage = document.getElementById('captured-image');
+  // Prepare overlay text
+  const overlayText = `${supplier}${model ? ' | ' + model : ''} | Rp${price.toLocaleString('id-ID')}`;
+  const timestamp = new Date().toLocaleString('id-ID', { 
+    day: '2-digit', 
+    month: '2-digit', 
+    year: 'numeric', 
+    hour: '2-digit', 
+    minute: '2-digit' 
+  });
   
-  // Set canvas dimensions
-  canvas.width = video.videoWidth;
-  canvas.height = video.videoHeight;
-  
-  // Validate video dimensions before processing
-  if (!canvas.width || !canvas.height || canvas.width <= 0 || canvas.height <= 0) {
-    showNotification('Video not ready. Please try capturing again.', 'error');
-    return;
-  }
-  
-  // Draw video frame to canvas
-  const ctx = canvas.getContext('2d');
-  ctx.drawImage(video, 0, 0);
-  
-  // Compress image
   try {
-    capturedBlob = await compressImage(canvas, {
+    // Use shared camera module for capture
+    const { blob } = await captureImageFromModule({
       maxWidth: 1200,
       quality: 0.7,
       format: 'jpeg',
+      overlayText,
+      timestamp,
     });
     
     // Store data for saving later
+    capturedBlob = blob;
     pendingData = { supplier, model, price };
     
-    // Show preview with stored data
-    const imageUrl = URL.createObjectURL(capturedBlob);
-    capturedImage.src = imageUrl;
-    previewContainer.classList.remove('hidden');
+    // Show preview using shared module
+    showPreview(blob, 'captured-image', 'preview-container');
     
     // Stop camera to save battery
-    if (videoStream) {
-      videoStream.getTracks().forEach(track => track.stop());
-      videoStream = null;
-    }
+    stopCamera();
     
   } catch (error) {
-    console.error('Compression error:', error);
-    showNotification('Failed to process image', 'error');
+    console.error('Capture error:', error);
+    showNotification(error.message || 'Failed to process image', 'error');
   }
 }
 
@@ -265,20 +227,14 @@ async function captureImage() {
  * Retake image
  */
 function retakeImage() {
-  const previewContainer = document.getElementById('preview-container');
-  const capturedImage = document.getElementById('captured-image');
+  // Use shared hidePreview to clean up blob URL
+  hidePreview('captured-image', 'preview-container');
   
-  // Revoke object URL to prevent memory leak
-  if (capturedImage.src && capturedImage.src.startsWith('blob:')) {
-    URL.revokeObjectURL(capturedImage.src);
-  }
-  
-  previewContainer.classList.add('hidden');
   capturedBlob = null;
   pendingData = null;
   
-  // Restart camera
-  initCamera();
+  // Restart camera using shared module
+  initCamera({ facingMode: getCurrentFacingMode() });
 }
 
 /**
@@ -316,63 +272,11 @@ async function saveCapture(continueBatch = false) {
   continueBtn.textContent = 'Saving...';
   
   try {
-    // Get or create supplier
-    let supplierId;
-    const suppliers = await getSuppliers();
-    const existingSupplier = suppliers.find(s => s.name.toLowerCase() === supplier.toLowerCase());
+    // Get or create supplier using shared data service
+    const supplierId = await getOrCreateSupplier(supplier);
     
-    if (existingSupplier) {
-      supplierId = existingSupplier.id;
-    } else {
-      // Create new supplier locally first
-      const newSupplier = await addSupplier({
-        id: uuidv4(),
-        name: supplier,
-        normalized_name: supplier.toLowerCase().trim(),
-      });
-      supplierId = newSupplier.id;
-      
-      // Try to sync to server (will be queued if offline)
-      try {
-        await createSupplier({
-          id: supplierId,
-          organization_id: window.appState.organization?.id,
-          name: supplier,
-          normalized_name: supplier.toLowerCase().trim(),
-        });
-      } catch (e) {
-        console.log('Supplier will sync later');
-      }
-    }
-    
-    // Get or create model
-    let modelId = null;
-    if (model) {
-      const models = await getModels();
-      const existingModel = models.find(m => m.name.toLowerCase() === model.toLowerCase());
-      
-      if (existingModel) {
-        modelId = existingModel.id;
-      } else {
-        const newModel = await addModel({
-          id: uuidv4(),
-          name: model,
-          normalized_name: model.toLowerCase().trim(),
-        });
-        modelId = newModel.id;
-        
-        try {
-          await createModel({
-            id: modelId,
-            organization_id: window.appState.organization?.id,
-            name: model,
-            normalized_name: model.toLowerCase().trim(),
-          });
-        } catch (e) {
-          console.log('Model will sync later');
-        }
-      }
-    }
+    // Get or create model using shared data service
+    const modelId = await getOrCreateModel(model);
     
     // Create item data
     const itemData = {
@@ -418,7 +322,7 @@ async function saveCapture(continueBatch = false) {
       // document.getElementById('supplier-input').value = '';
       
       // Restart camera
-      initCamera();
+      initializeCamera();
       
       showNotification('Item added to batch', 'success');
       
@@ -474,11 +378,11 @@ function handleBack() {
     document.getElementById('btn-confirm-discard').onclick = () => {
       modal.classList.add('hidden');
       batchItems = [];
-      stopCamera();
+      cleanupCamera();
       router.navigate('home');
     };
   } else {
-    stopCamera();
+    cleanupCamera();
     router.navigate('home');
   }
 }
@@ -493,35 +397,22 @@ export async function finishBatch() {
     return;
   }
   
-  // Save all items to queue
+  // Save all items using shared data service
   for (const item of batchItems) {
-    await saveProcurement({
-      id: item.id,
-      supplier_id: item.supplierId,
-      supplier_name: item.supplierName,
-      model_id: item.modelId,
-      model_name: item.modelName,
-      price: item.price,
-      quantity: 1,
-      captured_at: item.captured_at,
-      status: 'pending',
-    });
-    
-    await addToQueue({
-      requestId: item.id,
-      imageBlob: item.blob,
+    await saveProcurementItem({
       supplierId: item.supplierId,
       supplierName: item.supplierName,
       modelId: item.modelId,
       modelName: item.modelName,
       price: item.price,
       quantity: 1,
+      imageBlob: item.blob,
     });
   }
   
   const count = batchItems.length;
   batchItems = [];
-  stopCamera();
+  cleanupCamera();
   showNotification(`${count} items saved!`, 'success');
   router.navigate('home');
 }

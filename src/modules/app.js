@@ -2,16 +2,9 @@ import { supabase } from './api.js';
 import { onAuthStateChange, getSession, getOrganization } from './api.js';
 import { router, routes } from './router.js';
 import { syncEngine } from './sync.js';
+import { appState } from './state.js';
 
-// App state
-export const appState = {
-  user: null,
-  organization: null,
-  isOnline: navigator.onLine,
-  isSyncing: false,
-};
-
-// Attach to window for cross-module access
+// Attach to window for backward compatibility
 window.appState = appState;
 
 /**
@@ -38,7 +31,7 @@ export async function initApp() {
   }
   
   // Start sync engine if authenticated
-  if (appState.user) {
+  if (appState.get('user')) {
     syncEngine.start();
   }
 }
@@ -79,12 +72,12 @@ async function handleMagicLinkCallback() {
  */
 async function handleAuthChange(event, session) {
   if (event === 'SIGNED_IN' && session) {
-    appState.user = session.user;
+    appState.set('user', session.user);
     
     // Load organization
     try {
       const organization = await getOrganization();
-      appState.organization = organization;
+      appState.set('organization', organization);
     } catch (error) {
       console.error('Failed to load organization:', error);
     }
@@ -101,8 +94,8 @@ async function handleAuthChange(event, session) {
       router.navigate('home');
     }
   } else if (event === 'SIGNED_OUT') {
-    appState.user = null;
-    appState.organization = null;
+    appState.set('user', null);
+    appState.set('organization', null);
     
     // Stop sync engine
     syncEngine.stop();
@@ -116,11 +109,11 @@ async function handleAuthChange(event, session) {
  * Handle coming online
  */
 function handleOnline() {
-  appState.isOnline = true;
+  appState.set('isOnline', true);
   console.log('Network: Online');
   
   // Trigger sync
-  if (appState.user) {
+  if (appState.get('user')) {
     syncEngine.triggerSync();
   }
 }
@@ -129,7 +122,7 @@ function handleOnline() {
  * Handle going offline
  */
 function handleOffline() {
-  appState.isOnline = false;
+  appState.set('isOnline', false);
   console.log('Network: Offline');
   
   // Show offline indicator

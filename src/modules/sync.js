@@ -2,10 +2,52 @@
 import { getPendingItems, updateQueueItem, removeFromQueue, getAllQueueItems } from './db.js';
 import { getSignedUploadUrl, createProcurement, createProcurementImage } from './api.js';
 import { config } from './config.js';
+import { appState } from './state.js';
 import { v4 as uuidv4 } from 'uuid';
 
 let syncInterval = null;
 let isSyncing = false;
+let lastNetworkCheck = 0;
+let isNetworkAvailable = null;
+
+/**
+ * Test actual network connectivity by making a lightweight request
+ */
+async function testNetworkConnectivity() {
+  const now = Date.now();
+  
+  // Cache the result for 10 seconds to avoid too many requests
+  if (isNetworkAvailable !== null && (now - lastNetworkCheck) < 10000) {
+    return isNetworkAvailable;
+  }
+  
+  try {
+    // Try to reach the Supabase auth endpoint
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000);
+    
+    // Use Supabase URL from config
+    const supabaseUrl = config.supabase.url;
+    await fetch(`${supabaseUrl}/rest/v1/`, {
+      method: 'GET',
+      signal: controller.signal,
+    });
+    
+    clearTimeout(timeoutId);
+    
+    // Any response (even 400/500) means network is available
+    // Only network error means no connectivity
+    isNetworkAvailable = true;
+  } catch (error) {
+    console.log('Network test failed:', error.message);
+    // Fallback to navigator.onLine
+    isNetworkAvailable = navigator.onLine;
+  }
+  
+  lastNetworkCheck = now;
+  console.log('Network connectivity:', isNetworkAvailable);
+  return isNetworkAvailable;
+}
 
 /**
  * Start the sync engine
@@ -40,6 +82,9 @@ export function stop() {
  * Trigger manual sync
  */
 export function triggerSync() {
+  // Clear cached network status to force re-test
+  isNetworkAvailable = null;
+  lastNetworkCheck = 0;
   sync();
 }
 
@@ -48,6 +93,9 @@ export function triggerSync() {
  */
 function handleOnline() {
   console.log('Network available, triggering sync');
+  // Clear cached network status to force re-test
+  isNetworkAvailable = null;
+  lastNetworkCheck = 0;
   sync();
 }
 
@@ -56,7 +104,14 @@ function handleOnline() {
  */
 async function sync() {
   // Prevent concurrent syncs
-  if (isSyncing || !navigator.onLine) return;
+  if (isSyncing) return;
+  
+  // Test actual network connectivity
+  const online = await testNetworkConnectivity();
+  if (!online) {
+    console.log('Network not available, skipping sync');
+    return;
+  }
   
   isSyncing = true;
   
@@ -113,7 +168,7 @@ async function processItem(item) {
   // Update status to uploading
   await updateQueueItem(item.id, { status: 'uploading' });
   
-  const organizationId = window.appState?.organization?.id;
+  const organizationId = appState.get('organization')?.id;
   if (!organizationId) {
     throw new Error('No organization found');
   }
@@ -144,7 +199,7 @@ async function processItem(item) {
     price: item.price,
     currency: 'IDR',
     quantity: item.quantity || 1,
-    captured_by: window.appState.user?.id,
+    captured_by: appState.get('user')?.id,
     captured_at: new Date().toISOString(),
     device_id: getDeviceId(),
     batch_id: item.batchId || null,

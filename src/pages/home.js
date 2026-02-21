@@ -1,8 +1,9 @@
 // Home Page
 import { router } from '../modules/router.js';
 import { getAllQueueItems } from '../modules/db.js';
-import { appState } from '../modules/app.js';
-import { renderBottomNav, renderSkeleton, renderEmptyState, getCurrentTheme, toggleTheme, renderThemeToggle, initTheme, applyTheme } from '../modules/theme.js';
+import { appState } from '../modules/state.js';
+import { syncEngine } from '../modules/sync.js';
+import { renderBottomNav, getCurrentTheme, toggleTheme, renderThemeToggle, initTheme, applyTheme } from '../modules/theme.js';
 
 /**
  * Render home page
@@ -114,6 +115,11 @@ export async function renderHome(container) {
   // Setup event listeners
   document.getElementById('btn-capture').addEventListener('click', () => router.navigate('capture'));
   document.getElementById('btn-list').addEventListener('click', () => router.navigate('list'));
+  
+  // Sync button - manual retry
+  document.getElementById('sync-status').addEventListener('click', () => {
+    syncEngine.triggerSync();
+  });
   
   // Theme toggle
   document.getElementById('theme-toggle')?.addEventListener('click', () => {

@@ -4,6 +4,7 @@ import { renderHome } from '../pages/home.js';
 import { renderCapture } from '../pages/capture.js';
 import { renderList } from '../pages/list.js';
 import { renderDetail } from '../pages/detail.js';
+import { appState } from './state.js';
 
 // Route definitions
 const routes = {
@@ -56,7 +57,7 @@ export function navigate(routeName, params = {}) {
   
   // Check authentication
   const appElement = document.getElementById('app');
-  const isAuthenticated = !!window.appState?.user;
+  const isAuthenticated = !!appState.get('user');
   
   if (route.requiresAuth && !isAuthenticated) {
     // Store intended route for redirect after login

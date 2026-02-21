@@ -2,7 +2,7 @@
 import { signInWithEmail } from '../modules/api.js';
 import { router } from '../modules/router.js';
 import { showNotification } from '../modules/app.js';
-import { getCurrentTheme, toggleTheme, renderThemeToggle } from '../modules/theme.js';
+import { getCurrentTheme, toggleTheme } from '../modules/theme.js';
 
 /**
  * Render login page

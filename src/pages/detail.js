@@ -3,7 +3,7 @@ import { router } from '../modules/router.js';
 import { getProcurement } from '../modules/db.js';
 import { getProcurementDetails, getSignedDownloadUrl, updateProcurement, getAuditLogs, createAuditLog, getUserRole } from '../modules/api.js';
 import { formatCurrency, formatDate, showNotification } from '../modules/app.js';
-import { appState } from '../modules/app.js';
+import { appState } from '../modules/state.js';
 
 /**
  * Render detail page

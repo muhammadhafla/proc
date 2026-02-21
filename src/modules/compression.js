@@ -58,6 +58,8 @@ export async function compressImage(source, options = {}) {
  * Resize image to fit within max dimensions
  */
 export async function resizeImage(file, maxWidth, maxHeight) {
+  const objectUrl = URL.createObjectURL(file);
+  
   return new Promise((resolve, reject) => {
     const img = new Image();
     
@@ -94,6 +96,7 @@ export async function resizeImage(file, maxWidth, maxHeight) {
       // Convert to blob
       canvas.toBlob(
         (blob) => {
+          URL.revokeObjectURL(objectUrl);
           if (blob) {
             resolve(blob);
           } else {
@@ -105,8 +108,11 @@ export async function resizeImage(file, maxWidth, maxHeight) {
       );
     };
     
-    img.onerror = () => reject(new Error('Failed to load image'));
-    img.src = URL.createObjectURL(file);
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error('Failed to load image'));
+    };
+    img.src = objectUrl;
   });
 }
 

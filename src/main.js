@@ -3,9 +3,26 @@ import { initApp } from './modules/app.js';
 import { initDB } from './modules/db.js';
 import { initTheme } from './modules/theme.js';
 
+// Register Service Worker for offline support
+function registerServiceWorker() {
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', async () => {
+      try {
+        const registration = await navigator.serviceWorker.register('/sw.js');
+        console.log('Service Worker registered:', registration.scope);
+      } catch (error) {
+        console.error('Service Worker registration failed:', error);
+      }
+    });
+  }
+}
+
 // Initialize application
 async function bootstrap() {
   try {
+    // Register service worker first
+    registerServiceWorker();
+    
     // Initialize theme first (before any UI renders)
     initTheme();
     

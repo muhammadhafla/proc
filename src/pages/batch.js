@@ -1,10 +1,15 @@
 // Batch Capture Page
 import { router } from '../modules/router.js';
-import { addToQueue, addSupplier, addModel, saveProcurement, getSuppliers, getModels } from '../modules/db.js';
-import { createSupplier, createModel } from '../modules/api.js';
+import { getSuppliers } from '../modules/db.js';
 import { showNotification } from '../modules/app.js';
-import { compressImage } from '../modules/compression.js';
 import { v4 as uuidv4 } from 'uuid';
+import { initCamera, captureImage as captureImageFromModule, cleanupCamera, revokeAllBlobUrls, createBlobUrl, revokeBlobUrl } from '../modules/camera.js';
+import { getOrCreateSupplier, saveProcurementItem } from '../modules/dataService.js';
+
+// Set up navigation cleanup for blob URLs
+window.addEventListener('hashchange', () => {
+  revokeAllBlobUrls();
+});
 
 /**
  * Render batch capture page
@@ -126,7 +131,6 @@ export function renderBatch(container) {
   initBatchCapture();
 }
 
-let videoStream = null;
 let selectedSupplier = null;
 let batchItems = [];
 let allSuppliers = []; // Store all suppliers for filtering
@@ -167,7 +171,6 @@ function debounce(fn, delay) {
 function filterSuppliers() {
   const searchInput = document.getElementById('supplier-input');
   const searchTerm = searchInput.value.toLowerCase().trim();
-  const listEl = document.getElementById('supplier-list');
   
   if (!searchTerm) {
     // Show all suppliers if no search term
@@ -234,36 +237,15 @@ function selectSupplier(id, name) {
  * Start camera
  */
 async function startCamera() {
-  const video = document.getElementById('camera-preview');
-  
   try {
-    videoStream = await navigator.mediaDevices.getUserMedia({
-      video: {
-        facingMode: 'environment',
-        width: { ideal: 1920 },
-        height: { ideal: 1080 },
-      },
-      audio: false,
-    });
-    
-    video.srcObject = videoStream;
-    await video.play();
-    
+    await initCamera({ facingMode: 'environment' });
   } catch (error) {
-    console.error('Camera error:', error);
-    // Provide more helpful error message
-    if (error.name === 'NotAllowedError' || error.message.includes('Permission')) {
-      showNotification('Camera access denied. Please enable camera permissions in your browser settings.', 'error');
-    } else if (error.name === 'NotFoundError') {
-      showNotification('No camera found on this device', 'error');
-    } else {
-      showNotification('Failed to access camera', 'error');
-    }
+    console.error('Camera initialization failed:', error);
   }
 }
 
 /**
- * Handle capture
+ * Handle capture - uses shared camera module
  */
 async function captureImage() {
   const priceInput = document.getElementById('price-input');
@@ -278,37 +260,39 @@ async function captureImage() {
     return;
   }
   
-  const video = document.getElementById('camera-preview');
-  const canvas = document.getElementById('capture-canvas');
-  
-  canvas.width = video.videoWidth;
-  canvas.height = video.videoHeight;
-  
-  // Validate video dimensions before processing
-  if (!canvas.width || !canvas.height || canvas.width <= 0 || canvas.height <= 0) {
-    showNotification('Video not ready. Please try capturing again.', 'error');
-    return;
-  }
-  
-  const ctx = canvas.getContext('2d');
-  ctx.drawImage(video, 0, 0);
+  // Prepare overlay text
+  const modelDisplay = model || '-';
+  const overlayText = `${selectedSupplier.name} | ${modelDisplay} | Rp${price.toLocaleString('id-ID')}`;
+  const timestamp = new Date().toLocaleString('id-ID', { 
+    day: '2-digit', 
+    month: '2-digit', 
+    year: 'numeric', 
+    hour: '2-digit', 
+    minute: '2-digit' 
+  });
   
   try {
-    const blob = await compressImage(canvas, {
+    // Use shared camera module for capture
+    const { blob } = await captureImageFromModule({
       maxWidth: 1200,
       quality: 0.7,
+      format: 'jpeg',
+      overlayText,
+      timestamp,
     });
     
     // Show preview modal
-    showPreview(blob, {
+    showPreviewModal(blob, {
       supplier: selectedSupplier.name,
       model: model || '-',
       price: price,
     });
     
   } catch (error) {
-    console.error('Compression error:', error);
-    showNotification('Failed to process image', 'error');
+    console.error('Capture error:', error);
+    if (error.message !== 'Video not ready. Please try capturing again.') {
+      showNotification('Failed to process image', 'error');
+    }
   }
 }
 
@@ -317,7 +301,7 @@ async function captureImage() {
  */
 let pendingCapture = null;
 
-function showPreview(blob, data) {
+function showPreviewModal(blob, data) {
   pendingCapture = { blob, ...data };
   
   const modal = document.getElementById('preview-modal');
@@ -327,10 +311,10 @@ function showPreview(blob, data) {
   
   // Revoke previous URL if exists
   if (img.src && img.src.startsWith('blob:')) {
-    URL.revokeObjectURL(img.src);
+    revokeBlobUrl(img.src);
   }
-  
-  img.src = URL.createObjectURL(blob);
+
+  img.src = createBlobUrl(blob);
   supplier.textContent = data.supplier;
   details.textContent = `${data.model} - Rp ${data.price.toLocaleString('id-ID')}`;
   
@@ -340,7 +324,7 @@ function showPreview(blob, data) {
   document.getElementById('btn-discard').onclick = () => {
     // Revoke URL when discarding
     if (img.src && img.src.startsWith('blob:')) {
-      URL.revokeObjectURL(img.src);
+      revokeBlobUrl(img.src);
     }
     modal.classList.add('hidden');
     pendingCapture = null;
@@ -403,11 +387,11 @@ function handleBack() {
     document.getElementById('btn-confirm-discard').onclick = () => {
       modal.classList.add('hidden');
       batchItems = [];
-      stopCamera();
+      cleanupCamera();
       router.navigate('home');
     };
   } else {
-    stopCamera();
+    cleanupCamera();
     router.navigate('home');
   }
 }
@@ -421,31 +405,19 @@ async function handleFinish() {
     return;
   }
   
-  // Save all items to queue
+  // Save all items using shared data service
   for (const item of batchItems) {
-    await saveProcurement({
-      id: item.id,
-      supplier_id: item.supplierId,
-      supplier_name: item.supplierName,
-      model_name: item.modelName,
-      price: item.price,
-      quantity: 1,
-      captured_at: new Date().toISOString(),
-      status: 'pending',
-    });
-    
-    await addToQueue({
-      requestId: item.id,
-      imageBlob: item.blob,
+    await saveProcurementItem({
       supplierId: item.supplierId,
       supplierName: item.supplierName,
       modelName: item.modelName,
       price: item.price,
       quantity: 1,
+      imageBlob: item.blob,
     });
   }
   
-  stopCamera();
+  cleanupCamera();
   showNotification(`${batchItems.length} items saved!`, 'success');
   router.navigate('home');
 }
@@ -461,28 +433,15 @@ async function handleAddSupplier() {
     input.focus();
     return;
   }
-  
-  // Create supplier locally (await to ensure it's added before refreshing list)
-  await addSupplier({
-    id: uuidv4(),
-    name: name,
-    normalized_name: name.toLowerCase().trim(),
-  });
+
+  // Create supplier using shared data service (with sync support)
+  await getOrCreateSupplier(name);
   
   // Refresh list
   await loadSuppliers();
   
   input.value = '';
   showNotification('Supplier added', 'success');
-}
-
-/**
- * Stop camera
- */
-function stopCamera() {
-  if (videoStream) {
-    videoStream.getTracks().forEach(track => track.stop());
-  }
 }
 
 // Setup capture button handler

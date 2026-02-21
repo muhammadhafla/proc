@@ -3,8 +3,8 @@ import { router } from '../modules/router.js';
 import { getProcurements, getSuppliers } from '../modules/db.js';
 import { fetchProcurements, fetchSuppliers } from '../modules/api.js';
 import { formatCurrency, formatDate } from '../modules/app.js';
-import { appState } from '../modules/app.js';
-import { renderBottomNav, renderSkeleton, renderEmptyState } from '../modules/theme.js';
+import { appState } from '../modules/state.js';
+import { renderBottomNav } from '../modules/theme.js';
 
 /**
  * Render list page
@@ -150,8 +150,6 @@ async function loadSupplierFilter() {
  * Load procurements
  */
 async function loadProcurements() {
-  const listEl = document.getElementById('procurement-list');
-  
   try {
     // Try server first
     if (appState.isOnline && appState.organization?.id) {
