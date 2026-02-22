@@ -21,7 +21,7 @@ const routes = {
     requiresAuth: true,
   },
   batch: {
-    render: renderCapture, // Unified capture page (previously separate batch.js)
+    render: () => router.navigate('capture'),
     requiresAuth: true,
   },
   list: {

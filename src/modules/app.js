@@ -1,5 +1,5 @@
 import { supabase } from './api.js';
-import { onAuthStateChange, getSession, getOrganization } from './api.js';
+import { onAuthStateChange, getUser, getOrganization } from './api.js';
 import { router, routes } from './router.js';
 import { syncEngine } from './sync.js';
 import { appState } from './state.js';
@@ -18,16 +18,25 @@ export async function initApp() {
   // Listen for auth changes
   onAuthStateChange(handleAuthChange);
   
-  // Check initial session
-  const { data: { session } } = await getSession();
-  if (session) {
+  // Check initial session - use getSession to check Supabase session status
+  const { data: { session }, error } = await supabase.auth.getSession();
+  
+  if (session && !error) {
+    // Session is active, restore state
     await handleAuthChange('SIGNED_IN', session);
   } else {
-    // Check for token in URL hash (magic link callback)
-    await handleMagicLinkCallback();
+    // No active session - could be local session but server session expired
+    // Clear any cached session
+    console.log('Session expired or invalid, redirecting to login');
+    await supabase.auth.signOut();
     
-    // Show login page
-    router.navigate('login');
+    // Check for token in URL hash (magic link callback)
+    const magicLinkProcessed = await handleMagicLinkCallback();
+    
+    if (!magicLinkProcessed) {
+      // Show login page
+      router.navigate('login');
+    }
   }
   
   // Start sync engine if authenticated
@@ -138,15 +147,15 @@ function showOfflineIndicator() {
   
   const indicator = document.createElement('div');
   indicator.id = 'offline-indicator';
-  indicator.className = 'fixed top-0 left-0 right-0 bg-yellow-500 text-white text-center py-2 text-sm font-medium z-50';
-  indicator.textContent = 'You are offline. Data will sync when connected.';
+  indicator.className = 'fixed top-0 left-0 right-0 bg-yellow-500 text-white text-center py-2 text-sm font-medium z-50 cursor-pointer';
+  indicator.textContent = 'You are offline. Data will sync when connected. Click to dismiss.';
   
   document.body.appendChild(indicator);
   
-  // Auto hide after 10 seconds
-  setTimeout(() => {
+  // Click to dismiss
+  indicator.addEventListener('click', () => {
     indicator.remove();
-  }, 10000);
+  });
 }
 
 /**

@@ -59,7 +59,7 @@ async function loadDetail(id) {
     let auditLogs = [];
     
     // Try server first
-    if (appState.isOnline) {
+    if (appState.get('isOnline')) {
       try {
         procurement = await getProcurementDetails(id);
         // Fetch audit logs
@@ -89,7 +89,7 @@ async function loadDetail(id) {
     
     // Check if user can edit (manager or owner)
     let userRole = null;
-    if (appState.isOnline) {
+    if (appState.get('isOnline')) {
       try {
         userRole = await getUserRole();
       } catch (e) {
@@ -346,7 +346,7 @@ function showCorrectionModal(procurement) {
       // Create audit log
       await createAuditLog({
         organization_id: procurement.organization_id,
-        user_id: appState.user?.id,
+        user_id: appState.get('user')?.id,
         table_name: 'procurement',
         record_id: procurement.id,
         action: 'correction',

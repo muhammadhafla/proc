@@ -1,8 +1,24 @@
 // Shared Data Service Module
 // Reusable supplier/model/procurement handling for capture and batch pages
 import { v4 as uuidv4 } from 'uuid';
-import { addSupplier, addModel, saveProcurement, addToQueue, getSuppliers, getModels } from './db.js';
+import { addSupplier, addModel, saveProcurement, addToQueue, getSupplierByName, getModelByName } from './db.js';
 import { createSupplier, createModel } from './api.js';
+
+/**
+ * Wrap a promise with a timeout
+ * @param {Promise} promise - Promise to wrap
+ * @param {number} ms - Timeout in milliseconds
+ * @param {string} errorMessage - Error message for timeout
+ * @returns {Promise} - Promise that rejects after timeout
+ */
+function withTimeout(promise, ms, errorMessage) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => 
+      setTimeout(() => reject(new Error(errorMessage)), ms)
+    )
+  ]);
+}
 
 /**
  * Get or create a supplier (local + sync)
@@ -16,9 +32,8 @@ export async function getOrCreateSupplier(name) {
 
   const normalizedName = name.toLowerCase().trim();
   
-  // Check existing
-  const suppliers = await getSuppliers();
-  const existingSupplier = suppliers.find(s => s.name.toLowerCase() === normalizedName);
+  // Check existing - EFFICIENT using indexed lookup
+  const existingSupplier = await getSupplierByName(normalizedName);
 
   if (existingSupplier) {
     return existingSupplier.id;
@@ -32,14 +47,21 @@ export async function getOrCreateSupplier(name) {
     normalized_name: normalizedName,
   });
 
-  // Try to sync to server
+  // Try to sync to server with timeout
   try {
-    await createSupplier({
-      id: supplierId,
-      organization_id: window.appState?.organization?.id,
-      name: name.trim(),
-      normalized_name: normalizedName,
-    });
+    const organizationId = window.appState?.organization?.id;
+    if (organizationId) {
+      await withTimeout(
+        createSupplier({
+          id: supplierId,
+          organization_id: organizationId,
+          name: name.trim(),
+          normalized_name: normalizedName,
+        }),
+        5000,
+        'Supplier sync timeout'
+      );
+    }
   } catch (error) {
     console.log('Supplier will sync later:', error.message);
     // Silently fails - will be synced later via sync.js
@@ -60,9 +82,8 @@ export async function getOrCreateModel(name) {
 
   const normalizedName = name.toLowerCase().trim();
 
-  // Check existing
-  const models = await getModels();
-  const existingModel = models.find(m => m.name.toLowerCase() === normalizedName);
+  // Check existing - EFFICIENT using indexed lookup
+  const existingModel = await getModelByName(normalizedName);
 
   if (existingModel) {
     return existingModel.id;
@@ -76,14 +97,21 @@ export async function getOrCreateModel(name) {
     normalized_name: normalizedName,
   });
 
-  // Try to sync to server
+  // Try to sync to server with timeout
   try {
-    await createModel({
-      id: modelId,
-      organization_id: window.appState?.organization?.id,
-      name: name.trim(),
-      normalized_name: normalizedName,
-    });
+    const organizationId = window.appState?.organization?.id;
+    if (organizationId) {
+      await withTimeout(
+        createModel({
+          id: modelId,
+          organization_id: organizationId,
+          name: name.trim(),
+          normalized_name: normalizedName,
+        }),
+        5000,
+        'Model sync timeout'
+      );
+    }
   } catch (error) {
     console.log('Model will sync later:', error.message);
     // Silently fails - will be synced later via sync.js
@@ -150,14 +178,12 @@ export async function saveProcurementItem(item) {
  * @returns {Promise<string[]>} - Array of procurement IDs
  */
 export async function saveBatchItems(items) {
-  const ids = [];
-  
-  for (const item of items) {
-    const id = await saveProcurementItem(item);
-    ids.push(id);
-  }
+  // Process all items in parallel for maximum performance
+  const results = await Promise.all(
+    items.map(item => saveProcurementItem(item))
+  );
 
-  return ids;
+  return results;
 }
 
 /**

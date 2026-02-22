@@ -376,7 +376,10 @@ function handleBack() {
   if (batchItems.length > 0) {
     // Show custom confirmation modal
     const modal = document.getElementById('confirm-modal');
-    document.getElementById('confirm-item-count').textContent = batchItems.length;
+    const titleEl = document.getElementById('confirm-title');
+    const msgEl = modal.querySelector('p.text-gray-600');
+    titleEl.textContent = 'Discard Items?';
+    msgEl.innerHTML = 'You have <span id="confirm-item-count">' + batchItems.length + '</span> captured items that will be lost.';
     modal.classList.remove('hidden');
     
     // Setup modal buttons
@@ -387,6 +390,26 @@ function handleBack() {
     document.getElementById('btn-confirm-discard').onclick = () => {
       modal.classList.add('hidden');
       batchItems = [];
+      cleanupCamera();
+      router.navigate('home');
+    };
+  } else if (pendingCapture) {
+    // Show confirmation modal for pending capture
+    const modal = document.getElementById('confirm-modal');
+    const titleEl = document.getElementById('confirm-title');
+    const msgEl = modal.querySelector('p.text-gray-600');
+    titleEl.textContent = 'Discard Capture?';
+    msgEl.textContent = 'If you go back, the captured data will be lost.';
+    modal.classList.remove('hidden');
+    
+    // Setup modal buttons
+    document.getElementById('btn-cancel-discard').onclick = () => {
+      modal.classList.add('hidden');
+    };
+    
+    document.getElementById('btn-confirm-discard').onclick = () => {
+      modal.classList.add('hidden');
+      pendingCapture = null;
       cleanupCamera();
       router.navigate('home');
     };
@@ -405,21 +428,35 @@ async function handleFinish() {
     return;
   }
   
-  // Save all items using shared data service
-  for (const item of batchItems) {
-    await saveProcurementItem({
-      supplierId: item.supplierId,
-      supplierName: item.supplierName,
-      modelName: item.modelName,
-      price: item.price,
-      quantity: 1,
-      imageBlob: item.blob,
-    });
-  }
+  // Show loading state
+  const finishBtn = document.getElementById('btn-finish');
+  const originalText = finishBtn.textContent;
+  finishBtn.disabled = true;
+  finishBtn.textContent = 'Saving...';
   
-  cleanupCamera();
-  showNotification(`${batchItems.length} items saved!`, 'success');
-  router.navigate('home');
+  try {
+    // Save all items in parallel
+    await Promise.all(
+      batchItems.map(item => saveProcurementItem({
+        supplierId: item.supplierId,
+        supplierName: item.supplierName,
+        modelName: item.modelName,
+        price: item.price,
+        quantity: 1,
+        imageBlob: item.blob,
+      }))
+    );
+    
+    cleanupCamera();
+    showNotification(`${batchItems.length} items saved!`, 'success');
+    router.navigate('home');
+  } catch (error) {
+    console.error('Batch save error:', error);
+    showNotification('Failed to save some items', 'error');
+  } finally {
+    finishBtn.disabled = false;
+    finishBtn.textContent = originalText;
+  }
 }
 
 /**

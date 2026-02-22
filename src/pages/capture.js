@@ -2,9 +2,9 @@
 import { router } from '../modules/router.js';
 import { showNotification } from '../modules/app.js';
 import { v4 as uuidv4 } from 'uuid';
-import { initCamera, cleanupCamera, stopCamera, captureImage as captureImageFromModule, showPreview, hidePreview, getCurrentFacingMode, revokeAllBlobUrls } from '../modules/camera.js';
+import { initCamera, cleanupCamera, stopCamera, captureImage as captureImageFromModule, showPreview, hidePreview, getCurrentFacingMode, revokeAllBlobUrls, revokeBlobUrl } from '../modules/camera.js';
 import { getOrCreateSupplier, getOrCreateModel, saveProcurementItem } from '../modules/dataService.js';
-import { saveProcurement, addToQueue } from '../modules/db.js';
+import { saveProcurement, addToQueue, getSuppliers } from '../modules/db.js';
 
 // Set up navigation cleanup for blob URLs
 window.addEventListener('hashchange', () => {
@@ -44,14 +44,37 @@ export function renderCapture(container) {
         <!-- Quick Input Overlay -->
         <div class="absolute bottom-0 left-0 right-0 p-4 bg-gray-800/90">
           <div class="max-w-lg mx-auto space-y-3">
-            <!-- Supplier Input -->
-            <input 
-              type="text" 
-              id="supplier-input"
-              class="input bg-gray-700 border-gray-600 text-white"
-              placeholder="Supplier name"
-              aria-label="Supplier name"
-            >
+            <!-- Supplier Selection -->
+            <div class="relative">
+              <div class="flex gap-2">
+                <div class="relative flex-1">
+                  <input 
+                    type="text" 
+                    id="supplier-input"
+                    class="input bg-gray-700 border-gray-600 text-white pr-10"
+                    placeholder="Supplier name"
+                    aria-label="Supplier name"
+                    autocomplete="off"
+                  >
+                  <button 
+                    type="button"
+                    id="btn-show-suppliers"
+                    class="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-white"
+                    aria-label="Show existing suppliers"
+                  >
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                    </svg>
+                  </button>
+                </div>
+              </div>
+              <!-- Supplier Dropdown -->
+              <div id="supplier-dropdown" class="hidden absolute z-10 mt-1 w-full bg-gray-700 border border-gray-600 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                <div id="supplier-list" class="py-1">
+                  <!-- Supplier items will be populated here -->
+                </div>
+              </div>
+            </div>
             
             <!-- Model Input -->
             <input 
@@ -125,12 +148,20 @@ export function renderCapture(container) {
   document.getElementById('btn-retake').addEventListener('click', retakeImage);
   document.getElementById('btn-save-done').addEventListener('click', () => saveCapture(false));
   document.getElementById('btn-save-continue').addEventListener('click', () => saveCapture(true));
+  
+  // Setup supplier dropdown
+  setupSupplierDropdown();
 }
 
 // Module-level state
 let capturedBlob = null;
 let pendingData = null; // Store supplier/model/price for capture-then-edit flow
 let batchItems = []; // Store items for batch mode
+
+// Supplier cache
+let cachedSuppliers = null;
+let suppliersCacheTime = 0;
+const SUPPLIERS_CACHE_DURATION = 60000; // 1 minute
 
 /**
  * Initialize camera - wrapper that uses shared module
@@ -160,6 +191,126 @@ function updateBatchIndicator() {
     indicator.classList.add('hidden');
     finishBtn.classList.add('hidden');
   }
+}
+
+/**
+ * Setup supplier dropdown functionality
+ */
+function setupSupplierDropdown() {
+  const supplierInput = document.getElementById('supplier-input');
+  const dropdownBtn = document.getElementById('btn-show-suppliers');
+  const dropdown = document.getElementById('supplier-dropdown');
+  const supplierList = document.getElementById('supplier-list');
+  let suppliers = [];
+  let isDropdownOpen = false;
+  
+  // Load suppliers from database with caching
+  async function loadSuppliers() {
+    const now = Date.now();
+    
+    // Return cached suppliers if still valid
+    if (cachedSuppliers && (now - suppliersCacheTime) < SUPPLIERS_CACHE_DURATION) {
+      suppliers = cachedSuppliers;
+      return cachedSuppliers;
+    }
+    
+    try {
+      cachedSuppliers = await getSuppliers();
+      suppliersCacheTime = now;
+      suppliers = cachedSuppliers;
+    } catch (error) {
+      console.error('Failed to load suppliers:', error);
+      cachedSuppliers = [];
+      suppliers = [];
+    }
+    
+    return cachedSuppliers;
+  }
+  
+  // Render supplier list
+  function renderSupplierList(filter = '') {
+    const normalizedFilter = filter.toLowerCase().trim();
+    const filtered = normalizedFilter 
+      ? suppliers.filter(s => s.name.toLowerCase().includes(normalizedFilter))
+      : suppliers;
+    
+    if (filtered.length === 0) {
+      supplierList.innerHTML = `
+        <div class="px-4 py-3 text-gray-400 text-sm">
+          ${suppliers.length === 0 ? 'Belum ada supplier' : 'Tidak ada hasil'}
+        </div>
+      `;
+      return;
+    }
+    
+    supplierList.innerHTML = filtered.map(supplier => `
+      <button 
+        type="button"
+        class="w-full px-4 py-2 text-left text-white hover:bg-gray-600 focus:outline-none focus:bg-gray-600 supplier-item"
+        data-supplier-id="${supplier.id}"
+        data-supplier-name="${supplier.name}"
+      >
+        ${supplier.name}
+      </button>
+    `).join('');
+    
+    // Add click listeners to items
+    supplierList.querySelectorAll('.supplier-item').forEach(item => {
+      item.addEventListener('click', () => {
+        const name = item.dataset.supplierName;
+        const id = item.dataset.supplierId;
+        supplierInput.value = name;
+        supplierInput.dataset.supplierId = id;
+        closeDropdown();
+        supplierInput.focus();
+      });
+    });
+  }
+  
+  // Close dropdown
+  function closeDropdown() {
+    dropdown.classList.add('hidden');
+    isDropdownOpen = false;
+  }
+  
+  // Event: Button click to show dropdown
+  dropdownBtn.addEventListener('click', async (e) => {
+    e.preventDefault();
+    await loadSuppliers();
+    renderSupplierList('');
+    dropdown.classList.remove('hidden');
+    isDropdownOpen = true;
+  });
+  
+  // Event: Input change - filter suppliers
+  supplierInput.addEventListener('input', () => {
+    // Clear selected supplier ID when typing
+    delete supplierInput.dataset.supplierId;
+    
+    if (isDropdownOpen) {
+      renderSupplierList(supplierInput.value);
+    }
+  });
+  
+  // Event: Input focus - show dropdown with current filter
+  supplierInput.addEventListener('focus', async () => {
+    await loadSuppliers();
+    renderSupplierList(supplierInput.value);
+    dropdown.classList.remove('hidden');
+    isDropdownOpen = true;
+  });
+  
+  // Event: Click outside to close
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('.relative')) {
+      closeDropdown();
+    }
+  });
+  
+  // Prevent dropdown close when clicking inside
+  dropdown.addEventListener('click', (e) => {
+    e.stopPropagation();
+  });
 }
 
 /**
@@ -365,9 +516,12 @@ async function saveCapture(continueBatch = false) {
  */
 function handleBack() {
   if (batchItems.length > 0) {
-    // Show confirmation modal
+    // Show confirmation modal for batch items
     const modal = document.getElementById('confirm-modal');
-    document.getElementById('confirm-item-count').textContent = batchItems.length;
+    const titleEl = document.getElementById('confirm-title');
+    const msgEl = modal.querySelector('p.text-gray-600');
+    titleEl.textContent = 'Discard Items?';
+    msgEl.innerHTML = 'You have <span id="confirm-item-count">' + batchItems.length + '</span> captured items that will be lost.';
     modal.classList.remove('hidden');
     
     // Setup modal buttons
@@ -377,7 +531,35 @@ function handleBack() {
     
     document.getElementById('btn-confirm-discard').onclick = () => {
       modal.classList.add('hidden');
+      // Cleanup blobs first
+      batchItems.forEach(item => {
+        if (item.blob) {
+          const url = URL.createObjectURL(item.blob);
+          revokeBlobUrl(url);
+        }
+      });
       batchItems = [];
+      cleanupCamera();
+      router.navigate('home');
+    };
+  } else if (capturedBlob || pendingData) {
+    // Show confirmation modal for single capture in progress
+    const modal = document.getElementById('confirm-modal');
+    const titleEl = document.getElementById('confirm-title');
+    const msgEl = modal.querySelector('p.text-gray-600');
+    titleEl.textContent = 'Discard Capture?';
+    msgEl.textContent = 'If you go back, the captured data will be lost.';
+    modal.classList.remove('hidden');
+    
+    // Setup modal buttons
+    document.getElementById('btn-cancel-discard').onclick = () => {
+      modal.classList.add('hidden');
+    };
+    
+    document.getElementById('btn-confirm-discard').onclick = () => {
+      modal.classList.add('hidden');
+      capturedBlob = null;
+      pendingData = null;
       cleanupCamera();
       router.navigate('home');
     };
@@ -411,6 +593,15 @@ export async function finishBatch() {
   }
   
   const count = batchItems.length;
+  
+  // Revoke all blob URLs before clearing
+  batchItems.forEach(item => {
+    if (item.blob) {
+      const url = URL.createObjectURL(item.blob);
+      revokeBlobUrl(url);
+    }
+  });
+  
   batchItems = [];
   cleanupCamera();
   showNotification(`${count} items saved!`, 'success');
@@ -422,4 +613,12 @@ export async function finishBatch() {
  */
 export function getBatchCount() {
   return batchItems.length;
+}
+
+/**
+ * Invalidate suppliers cache - call this when sync completes to refresh cache
+ */
+export function invalidateSuppliersCache() {
+  cachedSuppliers = null;
+  suppliersCacheTime = 0;
 }

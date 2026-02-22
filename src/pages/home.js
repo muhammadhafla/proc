@@ -9,10 +9,19 @@ import { renderBottomNav, getCurrentTheme, toggleTheme, renderThemeToggle, initT
  * Render home page
  */
 export async function renderHome(container) {
-  // Get pending sync count
+  // Get pending sync count - optimized single pass
   const queueItems = await getAllQueueItems();
-  const pendingCount = queueItems.filter(item => item.status === 'pending').length;
-  const failedCount = queueItems.filter(item => item.status === 'failed').length;
+  let pendingCount = 0;
+  let failedCount = 0;
+
+  // Single pass through the array
+  for (const item of queueItems) {
+    if (item.status === 'pending') {
+      pendingCount++;
+    } else if (item.status === 'failed') {
+      failedCount++;
+    }
+  }
   
   // Initialize theme on first load
   initTheme();
@@ -30,7 +39,7 @@ export async function renderHome(container) {
             <h1 class="text-lg font-bold text-gray-900">Procurement</h1>
           </div>
           <div class="flex items-center gap-2">
-            ${!appState.isOnline ? `
+            ${!appState.get('isOnline') ? `
               <span class="px-2 py-1 bg-yellow-100 text-yellow-800 text-xs rounded-full">
                 Offline
               </span>

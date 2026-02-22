@@ -113,37 +113,39 @@ async function initList() {
 }
 
 /**
- * Load supplier filter options
+ * Load supplier filter options - optimized to prevent duplicates
  */
 async function loadSupplierFilter() {
   const select = document.getElementById('supplier-filter');
+  const supplierIds = new Set(); // Track added IDs to prevent duplicates
   
   try {
-    // Try to fetch from server first
-    if (appState.isOnline && appState.organization?.id) {
-      const suppliers = await fetchSuppliers(appState.organization.id);
-      
-      suppliers.forEach(s => {
-        const option = document.createElement('option');
-        option.value = s.id;
-        option.textContent = s.name;
-        select.appendChild(option);
+    // Fetch from server if online
+    if (appState.get('isOnline') && appState.get('organization')?.id) {
+      const serverSuppliers = await fetchSuppliers(appState.get('organization').id);
+      serverSuppliers.forEach(s => {
+        addSupplierOption(select, s.id, s.name);
+        supplierIds.add(s.id);
       });
     }
   } catch (error) {
     console.log('Using local suppliers');
   }
   
-  // Also load from local
+  // Load from local (only add if not already added)
   const localSuppliers = await getSuppliers();
   localSuppliers.forEach(s => {
-    if (!select.querySelector(`option[value="${s.id}"]`)) {
-      const option = document.createElement('option');
-      option.value = s.id;
-      option.textContent = s.name;
-      select.appendChild(option);
+    if (!supplierIds.has(s.id)) {
+      addSupplierOption(select, s.id, s.name);
     }
   });
+}
+
+function addSupplierOption(select, id, name) {
+  const option = document.createElement('option');
+  option.value = id;
+  option.textContent = name;
+  select.appendChild(option);
 }
 
 /**
@@ -152,8 +154,8 @@ async function loadSupplierFilter() {
 async function loadProcurements() {
   try {
     // Try server first
-    if (appState.isOnline && appState.organization?.id) {
-      const data = await fetchProcurements(appState.organization.id);
+    if (appState.get('isOnline') && appState.get('organization')?.id) {
+      const data = await fetchProcurements(appState.get('organization').id);
       allProcurements = data;
     }
   } catch (error) {

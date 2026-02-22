@@ -8,6 +8,11 @@ const supabase = createClient(
   config.supabase.anonKey
 );
 
+// User cache for performance
+let cachedUser = null;
+let cachedUserTime = 0;
+const USER_CACHE_DURATION = 30000; // 30 seconds
+
 // ==================== Authentication ====================
 
 /**
@@ -41,10 +46,32 @@ export function getSession() {
 }
 
 /**
- * Get current user
+ * Get current user - with caching for performance
  */
 export function getUser() {
-  return supabase.auth.getUser();
+  const now = Date.now();
+  
+  // Return cached user if still valid
+  if (cachedUser && (now - cachedUserTime) < USER_CACHE_DURATION) {
+    return { data: { user: cachedUser }, error: null };
+  }
+  
+  // Fetch fresh user and cache it
+  return supabase.auth.getUser().then(result => {
+    if (result.data?.user) {
+      cachedUser = result.data.user;
+      cachedUserTime = now;
+    }
+    return result;
+  });
+}
+
+/**
+ * Clear user cache - call on sign out
+ */
+export function clearUserCache() {
+  cachedUser = null;
+  cachedUserTime = 0;
 }
 
 /**
@@ -91,7 +118,14 @@ export async function getOrganization() {
     .eq('id', user.id)
     .single();
   
-  if (error) throw error;
+  if (error) {
+    // Handle the case where user record doesn't exist (HTTP 406)
+    if (error.code === 'PGRST116' || error.message?.includes('Cannot coerce')) {
+      console.warn('User record not found in database - user may need to be provisioned:', user.id);
+      return null;
+    }
+    throw error;
+  }
   return data?.organizations;
 }
 

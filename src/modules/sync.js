@@ -22,22 +22,28 @@ async function testNetworkConnectivity() {
   }
   
   try {
-    // Try to reach the Supabase auth endpoint
+    // Use a simple fetch to test connectivity - use navigator.onLine first as it's fastest
+    if (!navigator.onLine) {
+      isNetworkAvailable = false;
+      lastNetworkCheck = now;
+      console.log('Network connectivity (offline):', isNetworkAvailable);
+      return isNetworkAvailable;
+    }
+    
+    // Use a lightweight HEAD request to the root page (not the API which requires auth)
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 5000);
     
-    // Use Supabase URL from config
-    const supabaseUrl = config.supabase.url;
-    await fetch(`${supabaseUrl}/rest/v1/`, {
-      method: 'GET',
+    // Use the current origin instead of Supabase API (which requires auth)
+    const response = await fetch(window.location.origin, {
+      method: 'HEAD',
       signal: controller.signal,
     });
     
     clearTimeout(timeoutId);
     
-    // Any response (even 400/500) means network is available
-    // Only network error means no connectivity
-    isNetworkAvailable = true;
+    // Any response means network is available
+    isNetworkAvailable = response.ok || response.status === 405; // 405 is OK for HEAD
   } catch (error) {
     console.log('Network test failed:', error.message);
     // Fallback to navigator.onLine
@@ -257,9 +263,10 @@ async function cleanupCompleted() {
   const items = await getAllQueueItems();
   const completed = items.filter(item => item.status === 'success');
   
-  for (const item of completed) {
-    await removeFromQueue(item.id);
-  }
+  if (completed.length === 0) return;
+  
+  // Delete in parallel
+  await Promise.all(completed.map(item => removeFromQueue(item.id)));
 }
 
 /**
