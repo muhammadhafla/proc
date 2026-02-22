@@ -103,7 +103,7 @@ export function renderCapture(container) {
         </div>
         
         <!-- Captured Image Preview -->
-        <div id="preview-container" class="hidden absolute inset-0 bg-gray-900 flex flex-col">
+        <div id="preview-container" class="hidden absolute inset-0 bg-gray-900 flex flex-col z-20">
           <img id="captured-image" class="w-full h-48 object-contain bg-black" alt="Captured preview">
           
           <!-- Form (for editing after capture) -->
@@ -256,12 +256,17 @@ function setupSupplierDropdown() {
     
     // Add click listeners to items
     supplierList.querySelectorAll('.supplier-item').forEach(item => {
-      item.addEventListener('click', () => {
+      item.addEventListener('click', (e) => {
+        e.stopPropagation();
         const name = item.dataset.supplierName;
         const id = item.dataset.supplierId;
         supplierInput.value = name;
         supplierInput.dataset.supplierId = id;
-        closeDropdown();
+        
+        // Close dropdown immediately
+        dropdown.classList.add('hidden');
+        isDropdownOpen = false;
+        
         supplierInput.focus();
       });
     });

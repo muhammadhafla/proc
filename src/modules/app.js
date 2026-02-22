@@ -1,11 +1,12 @@
 import { supabase } from './api.js';
-import { onAuthStateChange, getUser, getOrganization } from './api.js';
+import { onAuthStateChange, getOrganization } from './api.js';
 import { router, routes } from './router.js';
 import { syncEngine } from './sync.js';
 import { appState } from './state.js';
 
 // Attach to window for backward compatibility
 window.appState = appState;
+window.appRouter = router;
 
 /**
  * Initialize the application
@@ -86,9 +87,27 @@ async function handleAuthChange(event, session) {
     // Load organization
     try {
       const organization = await getOrganization();
-      appState.set('organization', organization);
+      if (organization) {
+        appState.set('organization', organization);
+        console.log('User logged in:', session.user.email, '| Org:', organization.name, '| Role:', organization.userRole);
+      }
     } catch (error) {
-      console.error('Failed to load organization:', error);
+      console.error('Failed to load organization:', error.message);
+      
+      // Sign out user due to invalid access
+      await supabase.auth.signOut();
+      
+      if (error.message === 'USER_NOT_FOUND') {
+        showNotification('Access denied. Your account is not registered in the system. Please contact the administrator.', 'error');
+      } else if (error.message === 'USER_NO_ORGANIZATION') {
+        showNotification('Your account is not assigned to any organization. Please contact your administrator to get access.', 'error');
+      } else {
+        showNotification('Failed to load organization. Please try again or contact support.', 'error');
+      }
+      
+      // Stay on login page
+      router.navigate('login');
+      return;
     }
     
     // Start sync engine

@@ -4,6 +4,7 @@ import { renderHome } from '../pages/home.js';
 import { renderCapture } from '../pages/capture.js';
 import { renderList } from '../pages/list.js';
 import { renderDetail } from '../pages/detail.js';
+import { renderAdmin } from '../pages/admin.js';
 import { appState } from './state.js';
 
 // Route definitions
@@ -30,6 +31,10 @@ const routes = {
   },
   detail: {
     render: renderDetail,
+    requiresAuth: true,
+  },
+  admin: {
+    render: renderAdmin,
     requiresAuth: true,
   },
 };

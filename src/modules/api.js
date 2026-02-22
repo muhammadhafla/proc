@@ -1,6 +1,7 @@
 // Supabase API Module
 import { createClient } from '@supabase/supabase-js';
 import { config } from './config.js';
+import { appState } from './state.js';
 
 // Initialize Supabase client
 const supabase = createClient(
@@ -112,22 +113,46 @@ export async function getOrganization() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
   
-  const { data, error } = await supabase
+  // First check if user exists in users table
+  const { data: userData, error: userError } = await supabase
     .from('users')
-    .select('organizations(*)')
+    .select('id, organization_id, role, name')
     .eq('id', user.id)
     .single();
   
+  // User doesn't exist in database - reject login
+  if (userError || !userData) {
+    console.warn('User not found in database:', user.id);
+    throw new Error('USER_NOT_FOUND');
+  }
+  
+  // User exists but not assigned to any organization
+  if (!userData.organization_id) {
+    console.warn('User has no organization assigned:', user.id);
+    throw new Error('USER_NO_ORGANIZATION');
+  }
+  
+  // Fetch the organization details
+  const { data, error } = await supabase
+    .from('organizations')
+    .select('*')
+    .eq('id', userData.organization_id)
+    .single();
+  
   if (error) {
-    // Handle the case where user record doesn't exist (HTTP 406)
-    if (error.code === 'PGRST116' || error.message?.includes('Cannot coerce')) {
-      console.warn('User record not found in database - user may need to be provisioned:', user.id);
-      return null;
-    }
+    console.error('Failed to fetch organization:', error);
     throw error;
   }
-  return data?.organizations;
+  
+  // Return organization with user role info
+  return {
+    ...data,
+    userRole: userData.role,
+    userName: userData.name
+  };
 }
+
+
 
 // ==================== Suppliers ====================
 
@@ -327,6 +352,14 @@ export async function createProcurementImage(imageData) {
 // ==================== Worker/Signed URL ====================
 
 /**
+ * Get current access token
+ */
+async function getAccessToken() {
+  const { data: { session } } = await supabase.auth.getSession();
+  return session?.access_token || null;
+}
+
+/**
  * Get signed upload URL from Cloudflare Worker
  */
 export async function getSignedUploadUrl(organizationId, fileName, contentType) {
@@ -376,12 +409,320 @@ export async function getSignedDownloadUrl(storagePath) {
   return response.json();
 }
 
+// ==================== Admin Functions ====================
+
 /**
- * Get current access token
+ * Get current user role from app state
  */
-async function getAccessToken() {
-  const { data: { session } } = await supabase.auth.getSession();
-  return session?.access_token || null;
+export function getCurrentUserRole() {
+  const org = appState?.get?.('organization') || window.appState?.get?.('organization');
+  return org?.userRole || null;
+}
+
+/**
+ * Check if current user has required role
+ */
+export function hasAdminAccess() {
+  const role = getCurrentUserRole();
+  return role === 'owner' || role === 'manager';
+}
+
+/**
+ * Check if current user is owner
+ */
+export function isOwner() {
+  return getCurrentUserRole() === 'owner';
+}
+
+// ----- Organizations CRUD (Owner only) -----
+
+/**
+ * Get all organizations (Owner only)
+ */
+export async function adminGetOrganizations() {
+  if (!isOwner()) {
+    throw new Error('Access denied. Owner role required.');
+  }
+  
+  const { data, error } = await supabase
+    .from('organizations')
+    .select('*')
+    .order('created_at', { ascending: false });
+  
+  if (error) throw error;
+  return data;
+}
+
+/**
+ * Create organization (Owner only)
+ */
+export async function adminCreateOrganization(orgData) {
+  if (!isOwner()) {
+    throw new Error('Access denied. Owner role required.');
+  }
+  
+  const { data, error } = await supabase
+    .from('organizations')
+    .insert([orgData])
+    .select()
+    .single();
+  
+  if (error) throw error;
+  return data;
+}
+
+/**
+ * Update organization (Owner only)
+ */
+export async function adminUpdateOrganization(orgId, orgData) {
+  if (!isOwner()) {
+    throw new Error('Access denied. Owner role required.');
+  }
+  
+  const { data, error } = await supabase
+    .from('organizations')
+    .update(orgData)
+    .eq('id', orgId)
+    .select()
+    .single();
+  
+  if (error) throw error;
+  return data;
+}
+
+/**
+ * Delete organization (Owner only)
+ */
+export async function adminDeleteOrganization(orgId) {
+  if (!isOwner()) {
+    throw new Error('Access denied. Owner role required.');
+  }
+  
+  const { error } = await supabase
+    .from('organizations')
+    .delete()
+    .eq('id', orgId);
+  
+  if (error) throw error;
+  return { success: true };
+}
+
+// ----- Users CRUD -----
+
+/**
+ * Get all users - either all (owner) or org-specific (manager)
+ */
+export async function adminGetUsers(organizationId) {
+  const role = getCurrentUserRole();
+  
+  // Managers can only see users in their organization
+  if (role !== 'owner') {
+    if (!organizationId) {
+      const org = appState?.get?.('organization') || window.appState?.get?.('organization');
+      organizationId = org?.id;
+    }
+  }
+  
+  let query = supabase.from('users').select('*');
+  
+  // Owner can see all users if orgId is null, otherwise filter
+  if (organizationId) {
+    query = query.eq('organization_id', organizationId);
+  }
+  
+  const { data, error } = await query.order('created_at', { ascending: false });
+  
+  if (error) throw error;
+  return data;
+}
+
+/**
+ * Create user in organization (Owner only - assign role)
+ */
+export async function adminCreateUser(userData) {
+  const role = getCurrentUserRole();
+  
+  if (role !== 'owner') {
+    throw new Error('Access denied. Owner role required to create users.');
+  }
+  
+  const { data, error } = await supabase
+    .from('users')
+    .insert([userData])
+    .select()
+    .single();
+  
+  if (error) throw error;
+  return data;
+}
+
+/**
+ * Update user (Owner can change role, Manager can only update staff)
+ */
+export async function adminUpdateUser(userId, userData) {
+  const role = getCurrentUserRole();
+  
+  // Get current user data
+  const { data: currentUser, error: fetchError } = await supabase
+    .from('users')
+    .select('organization_id, role')
+    .eq('id', userId)
+    .single();
+  
+  if (fetchError || !currentUser) {
+    throw new Error('User not found');
+  }
+  
+  const org = appState?.get?.('organization') || window.appState?.get?.('organization');
+  
+  // Manager can only update staff in their organization
+  if (role === 'manager') {
+    if (currentUser.organization_id !== org?.id) {
+      throw new Error('Access denied. User not in your organization.');
+    }
+    if (currentUser.role === 'owner' || currentUser.role === 'manager') {
+      throw new Error('Access denied. Cannot edit owner or manager.');
+    }
+    // Manager cannot change role
+    if (userData.role) {
+      throw new Error('Access denied. Cannot change user role.');
+    }
+  }
+  
+  const { data, error } = await supabase
+    .from('users')
+    .update(userData)
+    .eq('id', userId)
+    .select()
+    .single();
+  
+  if (error) throw error;
+  return data;
+}
+
+/**
+ * Delete user (Owner only)
+ */
+export async function adminDeleteUser(userId) {
+  const role = getCurrentUserRole();
+  
+  if (role !== 'owner') {
+    throw new Error('Access denied. Owner role required to delete users.');
+  }
+  
+  const { error } = await supabase
+    .from('users')
+    .delete()
+    .eq('id', userId);
+  
+  if (error) throw error;
+  return { success: true };
+}
+
+/**
+ * Get staff users (for Manager to add/remove)
+ */
+export async function adminGetStaff(organizationId) {
+  const role = getCurrentUserRole();
+  
+  if (role !== 'owner' && role !== 'manager') {
+    throw new Error('Access denied.');
+  }
+  
+  const { data, error } = await supabase
+    .from('users')
+    .select('*')
+    .eq('organization_id', organizationId)
+    .eq('role', 'staff')
+    .order('created_at', { ascending: false });
+  
+  if (error) throw error;
+  return data;
+}
+
+// ----- Suppliers CRUD -----
+
+/**
+ * Get all suppliers - either all (owner) or org-specific (manager)
+ */
+export async function adminGetSuppliers(organizationId) {
+  const role = getCurrentUserRole();
+  
+  if (role !== 'owner' && role !== 'manager') {
+    throw new Error('Access denied.');
+  }
+  
+  let query = supabase.from('suppliers').select('*');
+  
+  // Filter by organization if provided
+  if (organizationId) {
+    query = query.eq('organization_id', organizationId);
+  }
+  
+  const { data, error } = await query.order('name');
+  
+  if (error) throw error;
+  return data;
+}
+
+/**
+ * Create supplier
+ */
+export async function adminCreateSupplier(supplierData) {
+  const role = getCurrentUserRole();
+  
+  if (role !== 'owner' && role !== 'manager') {
+    throw new Error('Access denied.');
+  }
+  
+  const { data, error } = await supabase
+    .from('suppliers')
+    .insert([supplierData])
+    .select()
+    .single();
+  
+  if (error) throw error;
+  return data;
+}
+
+/**
+ * Update supplier
+ */
+export async function adminUpdateSupplier(supplierId, supplierData) {
+  const role = getCurrentUserRole();
+  
+  if (role !== 'owner' && role !== 'manager') {
+    throw new Error('Access denied.');
+  }
+  
+  const { data, error } = await supabase
+    .from('suppliers')
+    .update(supplierData)
+    .eq('id', supplierId)
+    .select()
+    .single();
+  
+  if (error) throw error;
+  return data;
+}
+
+/**
+ * Delete supplier
+ */
+export async function adminDeleteSupplier(supplierId) {
+  const role = getCurrentUserRole();
+  
+  if (role !== 'owner' && role !== 'manager') {
+    throw new Error('Access denied.');
+  }
+  
+  const { error } = await supabase
+    .from('suppliers')
+    .delete()
+    .eq('id', supplierId);
+  
+  if (error) throw error;
+  return { success: true };
 }
 
 // ==================== Export ====================

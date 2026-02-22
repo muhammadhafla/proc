@@ -176,19 +176,28 @@ async function processItem(item) {
   
   const organizationId = appState.get('organization')?.id;
   if (!organizationId) {
-    throw new Error('No organization found');
+    // Try to get fresh organization from server
+    const { getOrganization } = await import('./api.js');
+    const org = await getOrganization();
+    if (org?.id) {
+      appState.set('organization', org);
+    } else {
+      throw new Error('No organization found. Please sign out and sign in again to provision your account.');
+    }
   }
+  
+  const finalOrgId = appState.get('organization')?.id;
   
   // Generate storage path
   const requestId = item.requestId || uuidv4();
   const now = new Date();
   const year = now.getFullYear();
   const month = String(now.getMonth() + 1).padStart(2, '0');
-  const storagePath = `${organizationId}/${item.supplierId}/${year}/${month}/${requestId}.jpg`;
+  const storagePath = `${finalOrgId}/${item.supplierId}/${year}/${month}/${requestId}.jpg`;
   
   // Get signed upload URL
   const { uploadUrl, fields } = await getSignedUploadUrl(
-    organizationId,
+    finalOrgId,
     `${requestId}.jpg`,
     'image/jpeg'
   );
@@ -198,7 +207,7 @@ async function processItem(item) {
   
   // Create procurement record in database
   const procurementData = {
-    organization_id: organizationId,
+    organization_id: finalOrgId,
     supplier_id: item.supplierId,
     model_id: item.modelId || null,
     request_id: requestId,
@@ -216,7 +225,7 @@ async function processItem(item) {
   // Create image metadata
   const imageData = {
     procurement_id: procurement.id,
-    organization_id: organizationId,
+    organization_id: finalOrgId,
     storage_path: storagePath,
     content_type: 'image/jpeg',
     file_size: item.imageBlob.size,
