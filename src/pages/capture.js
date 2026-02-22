@@ -4,7 +4,7 @@ import { showNotification } from '../modules/app.js';
 import { v4 as uuidv4 } from 'uuid';
 import { initCamera, cleanupCamera, stopCamera, captureImage as captureImageFromModule, showPreview, hidePreview, getCurrentFacingMode, revokeAllBlobUrls, revokeBlobUrl } from '../modules/camera.js';
 import { getOrCreateSupplier, getOrCreateModel, saveProcurementItem } from '../modules/dataService.js';
-import { saveProcurement, addToQueue, getSuppliers } from '../modules/db.js';
+import { getSuppliers } from '../modules/db.js';
 
 // Set up navigation cleanup for blob URLs
 window.addEventListener('hashchange', () => {
@@ -483,22 +483,27 @@ async function saveCapture(continueBatch = false) {
       showNotification('Item added to batch', 'success');
       
     } else {
-      // Single save - save immediately
-      const procurement = await saveProcurement(itemData);
-      
-      // Add to upload queue
-      await addToQueue({
-        requestId: procurement.id,
-        imageBlob: capturedBlob,
-        supplierId,
-        supplierName: supplier,
-        modelId,
-        modelName: model,
-        price,
-        quantity: 1,
-      });
-      
-      showNotification('Saved! Will sync when online.', 'success');
+      // Single save - save using optimistic queue (online-only)
+      try {
+        await saveProcurementItem({
+          supplierId,
+          supplierName: supplier,
+          modelId,
+          modelName: model,
+          price,
+          quantity: 1,
+          imageBlob: capturedBlob,
+        });
+        
+        showNotification('Saved! Uploading...', 'success');
+      } catch (error) {
+        if (error.message.includes('internet') || error.message.includes('Offline') || error.message.includes('koneksi')) {
+          showNotification('Koneksi internet diperlukan untuk menyimpan data', 'error');
+        } else {
+          showNotification('Failed to save: ' + error.message, 'error');
+        }
+        throw error; // Re-throw to trigger finally block
+      }
       
       // Navigate back to home
       stopCamera();

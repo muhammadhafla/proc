@@ -1,4 +1,6 @@
-// Procurement System - Service Worker for Offline Support
+// Procurement System - Service Worker (Simplified for Online-Only)
+// Only caches static assets, no offline API support
+
 const CACHE_NAME = 'procurement-v1';
 const ASSETS = [
   '/',
@@ -19,20 +21,32 @@ self.addEventListener('install', (event) => {
   self.skipWaiting();
 });
 
-// Fetch event - serve from cache, fallback to network
+// Fetch event - for navigation, try network first
 self.addEventListener('fetch', (event) => {
-  // Skip non-GET requests
+  // Skip non-GET requests (API calls, uploads)
   if (event.request.method !== 'GET') return;
 
+  // For navigation requests (HTML pages), try network first
+  if (event.request.mode === 'navigate') {
+    event.respondWith(
+      fetch(event.request).catch(() => {
+        // Fallback to cache if network fails
+        return caches.match('/index.html');
+      })
+    );
+    return;
+  }
+
+  // For other requests (assets), use cache-first strategy
   event.respondWith(
     caches.match(event.request).then((response) => {
-      // Return cached version or fetch from network
       if (response) {
         return response;
       }
       
+      // Not in cache, fetch from network
       return fetch(event.request).then((networkResponse) => {
-        // Optionally cache new requests
+        // Cache successful responses for assets
         if (networkResponse && networkResponse.status === 200) {
           const responseClone = networkResponse.clone();
           caches.open(CACHE_NAME).then((cache) => {
@@ -40,12 +54,6 @@ self.addEventListener('fetch', (event) => {
           });
         }
         return networkResponse;
-      }).catch(() => {
-        // If both cache and network fail, return offline page for navigation
-        if (event.request.mode === 'navigate') {
-          return caches.match('/');
-        }
-        return new Response('Offline', { status: 503, statusText: 'Service Unavailable' });
       });
     })
   );
@@ -61,7 +69,7 @@ self.addEventListener('activate', (event) => {
           .map((name) => {
             console.log('Service Worker: Clearing old cache:', name);
             return caches.delete(name);
-          })
+          });
       );
     }).then(() => {
       // Take control immediately

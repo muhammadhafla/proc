@@ -1,4 +1,7 @@
-// IndexedDB Module - Offline-first local storage
+// IndexedDB Module - Local cache for read-only data (Online-Only)
+// Queue operations moved to uploadQueue.js
+// For backward compatibility, queue functions are deprecated and will be removed
+// Use uploadQueue.js directly for queue operations
 import { openDB } from 'idb';
 
 const DB_NAME = 'procurement-db';

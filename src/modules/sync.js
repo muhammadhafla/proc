@@ -1,301 +1,54 @@
-// Sync Engine - Background synchronization module
-import { getPendingItems, updateQueueItem, removeFromQueue, getAllQueueItems } from './db.js';
-import { getSignedUploadUrl, createProcurement, createProcurementImage } from './api.js';
-import { config } from './config.js';
-import { appState } from './state.js';
-import { v4 as uuidv4 } from 'uuid';
+// Sync Module - Re-exports from uploadQueue (Online-Only)
+// This module is kept for backward compatibility
+// Use uploadQueue.js directly for queue operations
 
-let syncInterval = null;
-let isSyncing = false;
-let lastNetworkCheck = 0;
-let isNetworkAvailable = null;
+import {
+  addToQueue,
+  getQueueItems,
+  getQueueItem,
+  retryItem,
+  removeFromQueue,
+  onQueueChange,
+  getQueueStats,
+  isOnline,
+  uploadQueue,
+} from './uploadQueue.js';
 
-/**
- * Test actual network connectivity by making a lightweight request
- */
-async function testNetworkConnectivity() {
-  const now = Date.now();
-  
-  // Cache the result for 10 seconds to avoid too many requests
-  if (isNetworkAvailable !== null && (now - lastNetworkCheck) < 10000) {
-    return isNetworkAvailable;
-  }
-  
-  try {
-    // Use a simple fetch to test connectivity - use navigator.onLine first as it's fastest
-    if (!navigator.onLine) {
-      isNetworkAvailable = false;
-      lastNetworkCheck = now;
-      console.log('Network connectivity (offline):', isNetworkAvailable);
-      return isNetworkAvailable;
-    }
-    
-    // Use a lightweight HEAD request to the root page (not the API which requires auth)
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5000);
-    
-    // Use the current origin instead of Supabase API (which requires auth)
-    const response = await fetch(window.location.origin, {
-      method: 'HEAD',
-      signal: controller.signal,
-    });
-    
-    clearTimeout(timeoutId);
-    
-    // Any response means network is available
-    isNetworkAvailable = response.ok || response.status === 405; // 405 is OK for HEAD
-  } catch (error) {
-    console.log('Network test failed:', error.message);
-    // Fallback to navigator.onLine
-    isNetworkAvailable = navigator.onLine;
-  }
-  
-  lastNetworkCheck = now;
-  console.log('Network connectivity:', isNetworkAvailable);
-  return isNetworkAvailable;
-}
+// Re-export all functions for backward compatibility
+export {
+  addToQueue,
+  getQueueItems as getPendingItems,
+  getQueueItem,
+  retryItem as updateQueueItem,
+  removeFromQueue,
+  getQueueItems as getAllQueueItems,
+  onQueueChange,
+  getQueueStats,
+  isOnline,
+  uploadQueue,
+};
 
-/**
- * Start the sync engine
- */
-export function start() {
-  if (syncInterval) return;
-  
-  console.log('Sync engine started');
-  
-  // Initial sync
-  sync();
-  
-  // Set up periodic sync every 30 seconds
-  syncInterval = setInterval(sync, 30000);
-  
-  // Also sync when network becomes available
-  window.addEventListener('online', handleOnline);
-}
-
-/**
- * Stop the sync engine
- */
-export function stop() {
-  if (syncInterval) {
-    clearInterval(syncInterval);
-    syncInterval = null;
-  }
-  console.log('Sync engine stopped');
-}
-
-/**
- * Trigger manual sync
- */
-export function triggerSync() {
-  // Clear cached network status to force re-test
-  isNetworkAvailable = null;
-  lastNetworkCheck = 0;
-  sync();
-}
-
-/**
- * Handle coming online
- */
-function handleOnline() {
-  console.log('Network available, triggering sync');
-  // Clear cached network status to force re-test
-  isNetworkAvailable = null;
-  lastNetworkCheck = 0;
-  sync();
-}
-
-/**
- * Main sync function
- */
-async function sync() {
-  // Prevent concurrent syncs
-  if (isSyncing) return;
-  
-  // Test actual network connectivity
-  const online = await testNetworkConnectivity();
-  if (!online) {
-    console.log('Network not available, skipping sync');
-    return;
-  }
-  
-  isSyncing = true;
-  
-  try {
-    const pendingItems = await getPendingItems();
-    
-    if (pendingItems.length === 0) {
-      console.log('No pending items to sync');
-      return;
-    }
-    
-    console.log(`Syncing ${pendingItems.length} pending items...`);
-    
-    // Process items sequentially
-    for (const item of pendingItems) {
-      try {
-        await processItem(item);
-      } catch (error) {
-        console.error('Failed to sync item:', error);
-        
-        // Increment retry count
-        const newRetryCount = (item.retryCount || 0) + 1;
-        
-        if (newRetryCount >= config.sync.retryAttempts) {
-          // Mark as failed after max retries
-          await updateQueueItem(item.id, {
-            status: 'failed',
-            retryCount: newRetryCount,
-            error: error.message,
-          });
-        } else {
-          // Update retry count
-          await updateQueueItem(item.id, {
-            retryCount: newRetryCount,
-          });
-        }
-      }
-    }
-    
-    // Clean up completed items
-    await cleanupCompleted();
-    
-  } catch (error) {
-    console.error('Sync error:', error);
-  } finally {
-    isSyncing = false;
-  }
-}
-
-/**
- * Process a single queue item
- */
-async function processItem(item) {
-  // Update status to uploading
-  await updateQueueItem(item.id, { status: 'uploading' });
-  
-  const organizationId = appState.get('organization')?.id;
-  if (!organizationId) {
-    // Try to get fresh organization from server
-    const { getOrganization } = await import('./api.js');
-    const org = await getOrganization();
-    if (org?.id) {
-      appState.set('organization', org);
-    } else {
-      throw new Error('No organization found. Please sign out and sign in again to provision your account.');
-    }
-  }
-  
-  const finalOrgId = appState.get('organization')?.id;
-  
-  // Generate storage path
-  const requestId = item.requestId || uuidv4();
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  const storagePath = `${finalOrgId}/${item.supplierId}/${year}/${month}/${requestId}.jpg`;
-  
-  // Get signed upload URL
-  const { uploadUrl, fields } = await getSignedUploadUrl(
-    finalOrgId,
-    `${requestId}.jpg`,
-    'image/jpeg'
-  );
-  
-  // Upload image to R2
-  await uploadToR2(uploadUrl, fields, item.imageBlob);
-  
-  // Create procurement record in database
-  const procurementData = {
-    organization_id: finalOrgId,
-    supplier_id: item.supplierId,
-    model_id: item.modelId || null,
-    request_id: requestId,
-    price: item.price,
-    currency: 'IDR',
-    quantity: item.quantity || 1,
-    captured_by: appState.get('user')?.id,
-    captured_at: new Date().toISOString(),
-    device_id: getDeviceId(),
-    batch_id: item.batchId || null,
-  };
-  
-  const procurement = await createProcurement(procurementData);
-  
-  // Create image metadata
-  const imageData = {
-    procurement_id: procurement.id,
-    organization_id: finalOrgId,
-    storage_path: storagePath,
-    content_type: 'image/jpeg',
-    file_size: item.imageBlob.size,
-    variant: 'original',
-  };
-  
-  await createProcurementImage(imageData);
-  
-  // Remove from queue on success
-  await removeFromQueue(item.id);
-  
-  console.log(`Successfully synced item ${item.id}`);
-}
-
-/**
- * Upload image to R2 using signed URL
- */
-async function uploadToR2(uploadUrl, fields, blob) {
-  // Create FormData with signed fields
-  const formData = new FormData();
-  
-  for (const [key, value] of Object.entries(fields)) {
-    formData.append(key, value);
-  }
-  
-  // Add the file
-  formData.append('file', blob);
-  
-  // Upload
-  const response = await fetch(uploadUrl, {
-    method: 'POST',
-    body: formData,
-  });
-  
-  if (!response.ok) {
-    throw new Error(`Upload failed: ${response.status}`);
-  }
-}
-
-/**
- * Clean up completed items
- */
-async function cleanupCompleted() {
-  const items = await getAllQueueItems();
-  const completed = items.filter(item => item.status === 'success');
-  
-  if (completed.length === 0) return;
-  
-  // Delete in parallel
-  await Promise.all(completed.map(item => removeFromQueue(item.id)));
-}
-
-/**
- * Get or generate device ID
- */
-function getDeviceId() {
-  let deviceId = localStorage.getItem('device_id');
-  if (!deviceId) {
-    deviceId = uuidv4();
-    localStorage.setItem('device_id', deviceId);
-  }
-  return deviceId;
-}
-
-// Export sync engine
+// Legacy sync engine - kept for backward compatibility
+// The old auto-sync functionality has been removed
+// Queue is now processed immediately when items are added
 export const syncEngine = {
-  start,
-  stop,
-  triggerSync,
+  // No more auto-start
+  start: () => {
+    console.warn('syncEngine.start() is deprecated. Queue processes automatically.');
+  },
+  
+  stop: () => {
+    console.warn('syncEngine.stop() is deprecated. Queue processes automatically.');
+  },
+  
+  triggerSync: () => {
+    console.warn('syncEngine.triggerSync() is deprecated. Use addToQueue() instead.');
+  },
+  
   get isRunning() {
-    return !!syncInterval;
+    return true; // Always running (processes immediately)
   },
 };
+
+// Backward compatibility aliases
+export { uploadQueue as queue };
