@@ -4,7 +4,7 @@ import { getAllQueueItems } from '../modules/db.js';
 import { appState } from '../modules/state.js';
 import { syncEngine } from '../modules/sync.js';
 import { renderBottomNav, getCurrentTheme, toggleTheme, renderThemeToggle, initTheme, applyTheme } from '../modules/theme.js';
-import { hasAdminAccess } from '../modules/api.js';
+import { hasAdminAccess, signOut } from '../modules/api.js';
 
 /**
  * Render home page
@@ -59,6 +59,11 @@ export async function renderHome(container) {
                 </svg>
               </button>
             ` : ''}
+            <button id="btn-logout" class="p-2 hover:bg-gray-100 rounded-lg" aria-label="Logout">
+              <svg class="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/>
+              </svg>
+            </button>
           </div>
         </div>
       </header>
@@ -136,6 +141,13 @@ export async function renderHome(container) {
   
   // Admin button
   document.getElementById('btn-admin')?.addEventListener('click', () => router.navigate('admin'));
+  
+  // Logout button
+  document.getElementById('btn-logout').addEventListener('click', async () => {
+    if (confirm('Are you sure you want to logout?')) {
+      await signOut();
+    }
+  });
   
   // Sync button - manual retry
   document.getElementById('sync-status').addEventListener('click', () => {

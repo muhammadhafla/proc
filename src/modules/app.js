@@ -51,6 +51,31 @@ export async function initApp() {
  */
 async function handleMagicLinkCallback() {
   const hash = window.location.hash;
+  
+  // First, check for auth errors in the hash
+  if (hash && hash.includes('error=')) {
+    const params = new URLSearchParams(hash.substring(1));
+    const error = params.get('error');
+    const errorCode = params.get('error_code');
+    const errorDescription = params.get('error_description');
+    
+    if (error) {
+      // Clear the hash from URL
+      window.location.hash = '';
+      
+      // Navigate to login with error
+      router.navigate('login', { 
+        authError: {
+          error,
+          errorCode: errorCode || 'unknown',
+          errorDescription: errorDescription || 'An authentication error occurred'
+        }
+      });
+      return true;
+    }
+  }
+  
+  // Check for valid session (magic link success)
   if (hash && hash.includes('access_token')) {
     // Parse the hash fragment
     const params = new URLSearchParams(hash.substring(1));

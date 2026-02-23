@@ -1,4 +1,7 @@
-// IndexedDB Module - Offline-first local storage
+// IndexedDB Module - Local cache for read-only data (Online-Only)
+// Queue operations moved to uploadQueue.js
+// For backward compatibility, queue functions are deprecated and will be removed
+// Use uploadQueue.js directly for queue operations
 import { openDB } from 'idb';
 
 const DB_NAME = 'procurement-db';
@@ -12,8 +15,11 @@ let dbPromise = null;
 export async function initDB() {
   if (dbPromise) return dbPromise;
   
+  console.log('[DB] Initializing with version:', DB_VERSION);
+  
   dbPromise = openDB(DB_NAME, DB_VERSION, {
     upgrade(db, oldVersion, _newVersion, _transaction) {
+      console.log('[DB] Running upgrade, old version:', oldVersion, '-> new:', DB_VERSION);
       // Migration logic for version 2: Add settings store
       if (oldVersion < 2) {
         // Add settings store for app configuration

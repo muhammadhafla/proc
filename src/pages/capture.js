@@ -4,7 +4,8 @@ import { showNotification } from '../modules/app.js';
 import { v4 as uuidv4 } from 'uuid';
 import { initCamera, cleanupCamera, stopCamera, captureImage as captureImageFromModule, showPreview, hidePreview, getCurrentFacingMode, revokeAllBlobUrls, revokeBlobUrl } from '../modules/camera.js';
 import { getOrCreateSupplier, getOrCreateModel, saveProcurementItem } from '../modules/dataService.js';
-import { saveProcurement, addToQueue, getSuppliers } from '../modules/db.js';
+import { getSuppliers, cacheSuppliers } from '../modules/db.js';
+import { fetchSuppliers } from '../modules/api.js';
 
 // Set up navigation cleanup for blob URLs
 window.addEventListener('hashchange', () => {
@@ -215,6 +216,24 @@ function setupSupplierDropdown() {
     }
     
     try {
+      // Try to fetch from server if online
+      if (window.appState?.get('isOnline') && window.appState?.get('organization')?.id) {
+        try {
+          const serverSuppliers = await fetchSuppliers(window.appState.get('organization').id);
+          if (serverSuppliers && serverSuppliers.length > 0) {
+            // Cache to IndexedDB
+            await cacheSuppliers(serverSuppliers);
+            cachedSuppliers = serverSuppliers;
+            suppliersCacheTime = now;
+            suppliers = cachedSuppliers;
+            return cachedSuppliers;
+          }
+        } catch (fetchError) {
+          console.log('Failed to fetch suppliers from server, using local cache:', fetchError.message);
+        }
+      }
+      
+      // Fallback to local cache
       cachedSuppliers = await getSuppliers();
       suppliersCacheTime = now;
       suppliers = cachedSuppliers;
@@ -483,22 +502,27 @@ async function saveCapture(continueBatch = false) {
       showNotification('Item added to batch', 'success');
       
     } else {
-      // Single save - save immediately
-      const procurement = await saveProcurement(itemData);
-      
-      // Add to upload queue
-      await addToQueue({
-        requestId: procurement.id,
-        imageBlob: capturedBlob,
-        supplierId,
-        supplierName: supplier,
-        modelId,
-        modelName: model,
-        price,
-        quantity: 1,
-      });
-      
-      showNotification('Saved! Will sync when online.', 'success');
+      // Single save - save using optimistic queue (online-only)
+      try {
+        await saveProcurementItem({
+          supplierId,
+          supplierName: supplier,
+          modelId,
+          modelName: model,
+          price,
+          quantity: 1,
+          imageBlob: capturedBlob,
+        });
+        
+        showNotification('Saved! Uploading...', 'success');
+      } catch (error) {
+        if (error.message.includes('internet') || error.message.includes('Offline') || error.message.includes('koneksi')) {
+          showNotification('Koneksi internet diperlukan untuk menyimpan data', 'error');
+        } else {
+          showNotification('Failed to save: ' + error.message, 'error');
+        }
+        throw error; // Re-throw to trigger finally block
+      }
       
       // Navigate back to home
       stopCamera();
