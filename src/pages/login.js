@@ -5,11 +5,52 @@ import { getCurrentTheme, toggleTheme } from '../modules/theme.js';
 
 /**
  * Render login page
+ * @param {HTMLElement} container - Container element
+ * @param {Object} params - Route parameters including authError
  */
-export function renderLogin(container) {
+export function renderLogin(container, params = {}) {
   // Get current theme
   const currentTheme = getCurrentTheme();
   const isDark = currentTheme.name === 'dark';
+  
+  // Get auth error if present
+  const authError = params?.authError;
+  
+  // Map error codes to user-friendly messages
+  const errorMessages = {
+    'otp_expired': {
+      title: 'Link Expired',
+      message: 'The login link has expired. Magic links are valid for 1 hour. Please request a new one.',
+      icon: 'clock'
+    },
+    'access_denied': {
+      title: 'Access Denied',
+      message: 'The login link is invalid or has already been used. Please request a new magic link.',
+      icon: 'lock'
+    },
+    'invalid_token': {
+      title: 'Invalid Link',
+      message: 'The login link is invalid. Please request a new magic link.',
+      icon: 'x-circle'
+    },
+    'expired_token': {
+      title: 'Link Expired',
+      message: 'Your session has expired. Please request a new magic link.',
+      icon: 'clock'
+    }
+  };
+  
+  // Get the appropriate error message
+  let errorDisplay = null;
+  if (authError?.errorCode && errorMessages[authError.errorCode]) {
+    errorDisplay = errorMessages[authError.errorCode];
+  } else if (authError?.errorDescription) {
+    errorDisplay = {
+      title: 'Login Failed',
+      message: authError.errorDescription,
+      icon: 'alert-circle'
+    };
+  }
   
   container.innerHTML = `
     <div class="min-h-screen flex items-center justify-center p-4 ${isDark ? 'bg-gray-900' : 'bg-gradient-to-br from-primary-50 to-primary-100'}">
@@ -35,6 +76,21 @@ export function renderLogin(container) {
           <h1 class="text-2xl font-bold ${isDark ? 'text-white' : 'text-gray-900'}">Procurement System</h1>
           <p class="${isDark ? 'text-gray-400' : 'text-gray-600'} mt-2">Sign in to continue</p>
         </div>
+        
+        <!-- Error Alert -->
+        ${errorDisplay ? `
+        <div class="mb-6 p-4 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded-lg" role="alert">
+          <div class="flex items-start gap-3">
+            <svg class="w-5 h-5 text-red-500 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
+            <div>
+              <h3 class="text-sm font-semibold text-red-800 dark:text-red-400">${errorDisplay.title}</h3>
+              <p class="text-sm text-red-700 dark:text-red-300 mt-1">${errorDisplay.message}</p>
+            </div>
+          </div>
+        </div>
+        ` : ''}
         
         <!-- Login Form -->
         <div class="card ${isDark ? 'bg-gray-800 border-gray-700' : ''}">

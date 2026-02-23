@@ -117,6 +117,9 @@ export function initRouter() {
   const hash = window.location.hash.slice(1) || 'login';
   const [routeName] = hash.split('?');
   
+  // Note: Auth errors are handled in app.js handleMagicLinkCallback()
+  // This is just for regular route navigation
+  
   if (routes[routeName]) {
     navigate(routeName);
   } else {

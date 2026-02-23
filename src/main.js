@@ -27,7 +27,23 @@ async function bootstrap() {
     initTheme();
     
     // Initialize IndexedDB first (offline-first)
-    await initDB();
+    try {
+      await initDB();
+    } catch (dbError) {
+      // Handle version mismatch error - clear old database and retry
+      if (dbError.name === 'VersionError') {
+        console.warn('[DB] Version mismatch detected, clearing old database:', dbError.message);
+        
+        // Delete the old database to allow fresh start
+        await window.indexedDB.deleteDatabase('procurement-db');
+        console.log('[DB] Old database deleted, retrying initialization...');
+        
+        // Re-initialize after clearing
+        await initDB();
+      } else {
+        throw dbError; // Re-throw other errors
+      }
+    }
     
     // Initialize the app
     await initApp();

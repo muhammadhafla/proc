@@ -4,7 +4,8 @@ import { showNotification } from '../modules/app.js';
 import { v4 as uuidv4 } from 'uuid';
 import { initCamera, cleanupCamera, stopCamera, captureImage as captureImageFromModule, showPreview, hidePreview, getCurrentFacingMode, revokeAllBlobUrls, revokeBlobUrl } from '../modules/camera.js';
 import { getOrCreateSupplier, getOrCreateModel, saveProcurementItem } from '../modules/dataService.js';
-import { getSuppliers } from '../modules/db.js';
+import { getSuppliers, cacheSuppliers } from '../modules/db.js';
+import { fetchSuppliers } from '../modules/api.js';
 
 // Set up navigation cleanup for blob URLs
 window.addEventListener('hashchange', () => {
@@ -215,6 +216,24 @@ function setupSupplierDropdown() {
     }
     
     try {
+      // Try to fetch from server if online
+      if (window.appState?.get('isOnline') && window.appState?.get('organization')?.id) {
+        try {
+          const serverSuppliers = await fetchSuppliers(window.appState.get('organization').id);
+          if (serverSuppliers && serverSuppliers.length > 0) {
+            // Cache to IndexedDB
+            await cacheSuppliers(serverSuppliers);
+            cachedSuppliers = serverSuppliers;
+            suppliersCacheTime = now;
+            suppliers = cachedSuppliers;
+            return cachedSuppliers;
+          }
+        } catch (fetchError) {
+          console.log('Failed to fetch suppliers from server, using local cache:', fetchError.message);
+        }
+      }
+      
+      // Fallback to local cache
       cachedSuppliers = await getSuppliers();
       suppliersCacheTime = now;
       suppliers = cachedSuppliers;
