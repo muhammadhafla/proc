@@ -658,10 +658,12 @@ export async function adminGetSuppliers(organizationId) {
   if (organizationId) {
     query = query.eq('organization_id', organizationId);
   }
-  
+
   const { data, error } = await query.order('name');
   
-  if (error) throw error;
+  if (error) {
+    throw error;
+  }
   return data;
 }
 

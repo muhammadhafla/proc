@@ -1,7 +1,7 @@
 // Procurement System - Service Worker (Simplified for Online-Only)
 // Only caches static assets, no offline API support
 
-const CACHE_NAME = 'procurement-v1';
+const CACHE_NAME = 'procurement-v3';
 const ASSETS = [
   '/',
   '/index.html',
@@ -26,8 +26,16 @@ self.addEventListener('fetch', (event) => {
   // Skip non-GET requests (API calls, uploads)
   if (event.request.method !== 'GET') return;
 
+  const url = new URL(event.request.url);
+  const isExternal = url.origin !== self.location.origin;
+  const isNavigation = event.request.mode === 'navigate';
+  
+  // For external requests, let browser handle them directly (don't intercept)
+  if (isExternal) {
+    return; // Let the browser handle external requests natively
+  }
   // For navigation requests (HTML pages), try network first
-  if (event.request.mode === 'navigate') {
+  if (isNavigation) {
     event.respondWith(
       fetch(event.request).catch(() => {
         // Fallback to cache if network fails
@@ -62,18 +70,20 @@ self.addEventListener('fetch', (event) => {
 // Activate event - clean up old caches
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches.keys().then((cacheNames) => {
-      return Promise.all(
-        cacheNames
-          .filter((name) => name !== CACHE_NAME)
-          .map((name) => {
-            console.log('Service Worker: Clearing old cache:', name);
-            return caches.delete(name);
-          });
-      );
-    }).then(() => {
-      // Take control immediately
-      return self.clients.claim();
-    })
+    caches.keys()
+      .then((cacheNames) => {
+        return Promise.all(
+          cacheNames
+            .filter((name) => name !== CACHE_NAME)
+            .map((name) => {
+              console.log('Service Worker: Clearing old cache:', name);
+              return caches.delete(name);
+            })
+        );
+      })
+      .then(() => {
+        // Take control immediately
+        return self.clients.claim();
+      })
   );
 });

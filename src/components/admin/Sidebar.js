@@ -81,14 +81,26 @@ export function createSidebar(userRole, onNavigate) {
     });
   });
   
-  document.getElementById('sidebar-back')?.addEventListener('click', () => {
-    router.navigate('home');
+  // Add logout and back button handlers
+  sidebar.querySelector('#sidebar-logout')?.addEventListener('click', async () => {
+    if (confirm('Are you sure you want to logout?')) {
+      try {
+        await signOut();
+      } catch (e) {
+        // Ignore error if no active session, but log unexpected errors
+        if (e.message?.includes('No active session')) {
+          console.log('Logout: No active session');
+        } else {
+          console.error('Logout error:', e);
+        }
+      }
+      // Navigate to login page after logout
+      router.navigate('login');
+    }
   });
   
-  document.getElementById('sidebar-logout')?.addEventListener('click', async () => {
-    if (confirm('Are you sure you want to logout?')) {
-      await signOut();
-    }
+  sidebar.querySelector('#sidebar-back')?.addEventListener('click', () => {
+    router.navigate('home');
   });
   
   return sidebar;

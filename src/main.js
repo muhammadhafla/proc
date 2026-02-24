@@ -10,6 +10,19 @@ function registerServiceWorker() {
       try {
         const registration = await navigator.serviceWorker.register('/sw.js');
         console.log('Service Worker registered:', registration.scope);
+        
+        // Listen for SW updates - auto reload when new version available
+        registration.addEventListener('updatefound', () => {
+          const newWorker = registration.installing;
+          console.log('New Service Worker found, installing...');
+          
+          newWorker.addEventListener('statechange', () => {
+            if (newWorker.state === 'activated') {
+              console.log('New Service Worker activated, reloading...');
+              window.location.reload();
+            }
+          });
+        });
       } catch (error) {
         console.error('Service Worker registration failed:', error);
       }
@@ -32,7 +45,7 @@ async function bootstrap() {
     } catch (dbError) {
       // Handle version mismatch error - clear old database and retry
       if (dbError.name === 'VersionError') {
-        console.warn('[DB] Version mismatch detected, clearing old database:', dbError.message);
+        console.warn('[DB] Version mismatch detected, old version exists in browser');
         
         // Delete the old database to allow fresh start
         await window.indexedDB.deleteDatabase('procurement-db');
@@ -40,6 +53,7 @@ async function bootstrap() {
         
         // Re-initialize after clearing
         await initDB();
+        console.log('[DB] DB re-initialization successful after clearing old version');
       } else {
         throw dbError; // Re-throw other errors
       }

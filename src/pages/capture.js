@@ -69,10 +69,29 @@ export function renderCapture(container) {
                   </button>
                 </div>
               </div>
-              <!-- Supplier Dropdown -->
-              <div id="supplier-dropdown" class="hidden absolute z-10 mt-1 w-full bg-gray-700 border border-gray-600 rounded-lg shadow-lg max-h-48 overflow-y-auto">
-                <div id="supplier-list" class="py-1">
-                  <!-- Supplier items will be populated here -->
+              <!-- Supplier Modal -->
+              <div id="supplier-modal" class="hidden fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="supplier-modal-title">
+                <div class="bg-gray-800 rounded-xl max-w-sm w-full overflow-hidden shadow-2xl">
+                  <div class="p-4 border-b border-gray-700">
+                    <div class="flex items-center justify-between mb-3">
+                      <h3 id="supplier-modal-title" class="text-white font-semibold">Pilih Supplier</h3>
+                      <button id="btn-close-supplier-modal" class="p-1 text-gray-400 hover:text-white" aria-label="Close">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                        </svg>
+                      </button>
+                    </div>
+                    <input 
+                      type="text" 
+                      id="supplier-search"
+                      class="input bg-gray-700 border-gray-600 text-white w-full"
+                      placeholder="Cari supplier..."
+                      aria-label="Cari supplier"
+                    >
+                  </div>
+                  <div id="supplier-list" class="max-h-64 overflow-y-auto">
+                    <!-- Supplier items will be populated here -->
+                  </div>
                 </div>
               </div>
             </div>
@@ -195,15 +214,17 @@ function updateBatchIndicator() {
 }
 
 /**
- * Setup supplier dropdown functionality
+ * Setup supplier modal functionality
  */
 function setupSupplierDropdown() {
   const supplierInput = document.getElementById('supplier-input');
   const dropdownBtn = document.getElementById('btn-show-suppliers');
-  const dropdown = document.getElementById('supplier-dropdown');
+  const modal = document.getElementById('supplier-modal');
   const supplierList = document.getElementById('supplier-list');
+  const searchInput = document.getElementById('supplier-search');
+  const closeBtn = document.getElementById('btn-close-supplier-modal');
   let suppliers = [];
-  let isDropdownOpen = false;
+  let isModalOpen = false;
   
   // Load suppliers from database with caching
   async function loadSuppliers() {
@@ -255,7 +276,7 @@ function setupSupplierDropdown() {
     
     if (filtered.length === 0) {
       supplierList.innerHTML = `
-        <div class="px-4 py-3 text-gray-400 text-sm">
+        <div class="px-4 py-6 text-gray-400 text-sm text-center">
           ${suppliers.length === 0 ? 'Belum ada supplier' : 'Tidak ada hasil'}
         </div>
       `;
@@ -265,7 +286,7 @@ function setupSupplierDropdown() {
     supplierList.innerHTML = filtered.map(supplier => `
       <button 
         type="button"
-        class="w-full px-4 py-2 text-left text-white hover:bg-gray-600 focus:outline-none focus:bg-gray-600 supplier-item"
+        class="w-full px-4 py-3 text-left text-white hover:bg-gray-700 focus:outline-none focus:bg-gray-700 supplier-item border-b border-gray-700 last:border-b-0"
         data-supplier-id="${supplier.id}"
         data-supplier-name="${supplier.name}"
       >
@@ -282,58 +303,68 @@ function setupSupplierDropdown() {
         supplierInput.value = name;
         supplierInput.dataset.supplierId = id;
         
-        // Close dropdown immediately
-        dropdown.classList.add('hidden');
-        isDropdownOpen = false;
+        // Close modal
+        closeModal();
         
         supplierInput.focus();
       });
     });
   }
   
-  // Close dropdown
-  function closeDropdown() {
-    dropdown.classList.add('hidden');
-    isDropdownOpen = false;
-  }
-  
-  // Event: Button click to show dropdown
-  dropdownBtn.addEventListener('click', async (e) => {
-    e.preventDefault();
+  // Open modal
+  async function openModal() {
     await loadSuppliers();
     renderSupplierList('');
-    dropdown.classList.remove('hidden');
-    isDropdownOpen = true;
+    modal.classList.remove('hidden');
+    searchInput.value = '';
+    searchInput.focus();
+    isModalOpen = true;
+  }
+  
+  // Close modal
+  function closeModal() {
+    modal.classList.add('hidden');
+    isModalOpen = false;
+  }
+  
+  // Event: Button click to show modal
+  dropdownBtn.addEventListener('click', async (e) => {
+    e.preventDefault();
+    await openModal();
   });
   
-  // Event: Input change - filter suppliers
-  supplierInput.addEventListener('input', () => {
-    // Clear selected supplier ID when typing
-    delete supplierInput.dataset.supplierId;
-    
-    if (isDropdownOpen) {
-      renderSupplierList(supplierInput.value);
+  // Event: Input click to show modal
+  supplierInput.addEventListener('click', async (e) => {
+    e.preventDefault();
+    await openModal();
+  });
+  
+  // Event: Search input change - filter suppliers
+  searchInput.addEventListener('input', () => {
+    renderSupplierList(searchInput.value);
+  });
+  
+  // Event: Close button click
+  closeBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    closeModal();
+    supplierInput.focus();
+  });
+  
+  // Event: Click outside modal to close
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) {
+      closeModal();
+      supplierInput.focus();
     }
   });
   
-  // Event: Input focus - show dropdown with current filter
-  supplierInput.addEventListener('focus', async () => {
-    await loadSuppliers();
-    renderSupplierList(supplierInput.value);
-    dropdown.classList.remove('hidden');
-    isDropdownOpen = true;
-  });
-  
-  // Event: Click outside to close
-  document.addEventListener('click', (e) => {
-    if (!e.target.closest('.relative')) {
-      closeDropdown();
+  // Event: Escape key to close modal
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && isModalOpen) {
+      closeModal();
+      supplierInput.focus();
     }
-  });
-  
-  // Prevent dropdown close when clicking inside
-  dropdown.addEventListener('click', (e) => {
-    e.stopPropagation();
   });
 }
 

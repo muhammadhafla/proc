@@ -1,64 +1,41 @@
-# Rencana Implementasi Perbaikan Kode
+# Rencana Implementasi - Perbaikan Kode
 
-Dokumen ini berisi rencana implementasi untuk memperbaiki isu-isu yang ditemukan dalam analisis kode sebelumnya.
-
----
-
-## Daftar Isi
-
-1. [Ringkasan Isu](#ringkasan-isu)
-2. [Prioritas Tinggi](#prioritas-tinggi)
-3. [Prioritas Sedang](#prioritas-sedang)
-4. [Prioritas Rendah](#prioritas-rendah)
-5. [Jadwal Implementasi](#jadwal-implementasi)
+## Ringkasan
+Rencana ini menjelaskan langkah-langkah untuk memperbaiki semua masalah kritis, sedang, dan rendah yang ditemukan dalam analisis kode.
 
 ---
 
-## Ringkasan Isu
+## Fase 1: Perbaikan Kritis (Prioritas Tinggi)
 
-| # | File | Severity | Impact |
-|---|------|----------|--------|
-| 1 | sync.js:262 | Tinggi | Performa saat cleanup queue |
-| 2 | detail.js:349 | Kritis | Potential crash |
-| 3 | db.js:213 | Tinggi | Data corruption |
-| 4 | app.js:22 | Sedang | Lambat saat startup |
-| 5 | capture.js:576 | Tinggi | Memory leak |
-| 6 | router.js:23 | Rendah | Kode redundan |
-| 7 | login.js:181 | Sedang | Performa saat theme toggle |
-
----
-
-## Prioritas Tinggi
-
-### 1. Perbaiki appState Access di detail.js
-
+### 1.1 Perbaiki Akses appState di detail.js
 **File**: `src/pages/detail.js:349`
 
-**Masalah**:
+**Kode Saat Ini**:
 ```javascript
-// Salah - menggunakan property langsung
 user_id: appState.user?.id,
-
-// Seharusnya menggunakan get()
-user_id: appState.get('user')?.id,
 ```
 
-**Impact**: Potential undefined reference error
-
-**Solusi**:
+**Kode yang Diperbaiki**:
 ```javascript
 user_id: appState.get('user')?.id,
 ```
+
+**Langkah-langkah**:
+1. Buka `src/pages/detail.js`
+2. Navigasi ke baris 349
+3. Ganti `appState.user?.id` dengan `appState.get('user')?.id`
+4. Verifikasi dengan memeriksa penggunaan appState lain di file tersebut
 
 ---
 
-### 2. Tambahkan Error Handling di db.js
+### 1.2 Tambah Transaction Error Handling di db.js
+**File**: `src/modules/db.js`
 
-**File**: `src/modules/db.js:213`
+**Fungsi yang Harus Diperbaiki**:
+- `cacheSuppliers()` (baris 219)
+- `cacheModels()` (baris 328)
 
-**Masalah**: Transaksi IndexedDB tidak memiliki error handling
-
-**Solusi**:
+**Kode Saat Ini**:
 ```javascript
 export async function cacheSuppliers(suppliers) {
   if (!suppliers || suppliers.length === 0) {
@@ -69,11 +46,7 @@ export async function cacheSuppliers(suppliers) {
   const tx = db.transaction('suppliers', 'readwrite');
   const store = tx.objectStore('suppliers');
   
-  // Add error handling
-  tx.onerror = () => {
-    console.error('Transaction failed:', tx.error);
-  };
-  
+  // Use bulkPut for better performance
   for (const supplier of suppliers) {
     store.put(supplier);
   }
@@ -82,183 +55,249 @@ export async function cacheSuppliers(suppliers) {
 }
 ```
 
+**Kode yang Diperbaiki**:
+```javascript
+export async function cacheSuppliers(suppliers) {
+  if (!suppliers || suppliers.length === 0) {
+    return;
+  }
+  
+  const db = await getDB();
+  
+  try {
+    const tx = db.transaction('suppliers', 'readwrite');
+    const store = tx.objectStore('suppliers');
+    
+    // Add error handling
+    tx.onerror = () => {
+      console.error('Transaction failed:', tx.error);
+    };
+    
+    // Use bulkPut for better performance
+    for (const supplier of suppliers) {
+      store.put(supplier);
+    }
+    
+    return tx.done;
+  } catch (error) {
+    console.error('Failed to cache suppliers:', error);
+    throw error;
+  }
+}
+```
+
+**Langkah-langkah**:
+1. Buka `src/modules/db.js`
+2. Temukan fungsi `cacheSuppliers()`
+3. Tambahkan wrapper try-catch
+4. Tambahkan handler `tx.onerror`
+5. Ulangi untuk fungsi `cacheModels()`
+
 ---
 
-### 3. Perbaiki Blob Cleanup di capture.js
+### 1.3 Tambah Blob Cleanup di capture.js
+**File**: `src/pages/capture.js`
 
-**File**: `src/pages/capture.js:576`
+**Masalah Saat Ini**: Ketika `batchItems` dihapus, URL blob tidak direvoke
 
-**Masalah**: Blob URLs tidak di-revoke saat batch dikosongkan
-
-**Solusi**:
+**Langkah-langkah**:
+1. Tambahkan fungsi untuk membersihkan batch dengan cleanup blob:
 ```javascript
-// Tambahkan import
-import { revokeBlobUrl } from '../modules/camera.js';
-
-// Modifikasi fungsi clearBatch
-function clearBatch() {
-  // Revoke all blob URLs before clearing
+function clearBatchItems() {
   batchItems.forEach(item => {
     if (item.blob) {
-      // Create a temporary blob to revoke URL
-      const url = URL.createObjectURL(item.blob);
-      revokeBlobUrl(url);
+      revokeBlobUrl(URL.createObjectURL(item.blob));
     }
   });
   batchItems = [];
   updateBatchIndicator();
 }
-
-// Atau saat handleBack
-document.getElementById('btn-confirm-discard').onclick = () => {
-  // Cleanup blobs first
-  batchItems.forEach(item => {
-    if (item.blob) {
-      const url = URL.createObjectURL(item.blob);
-      revokeBlobUrl(url);
-    }
-  });
-  batchItems = [];
-  // ... rest of function
-};
 ```
+
+2. Ganti `batchItems = []` dengan `clearBatchItems()` di:
+   - Sekitar baris 490 (setelah simpan)
+   - Sekitar baris 576 (saat membersihkan batch)
 
 ---
 
-## Prioritas Sedang
+### 1.4 Hapus Duplicate Auth Checks di app.js
+**File**: `src/modules/app.js`
 
-### 4. Optimasi Queue Cleanup di sync.js
+**Masalah Saat Ini**: Baris 22-26 memiliki panggilan getUser() dan getSession() yang redundan
 
-**File**: `src/modules/sync.js:262`
-
-**Masalah**: Sequential deletion menyebabkan performa buruk
-
-**Solusi**:
+**Kode Saat Ini**:
 ```javascript
-// Sebelum (line 262-269)
-async function cleanupCompleted() {
-  const items = await getAllQueueItems();
-  const completed = items.filter(item => item.status === 'success');
-  
-  for (const item of completed) {
-    await removeFromQueue(item.id);
-  }
-}
-
-// Sesudah - parallel deletion
-async function cleanupCompleted() {
-  const items = await getAllQueueItems();
-  const completed = items.filter(item => item.status === 'success');
-  
-  if (completed.length === 0) return;
-  
-  // Delete in parallel
-  await Promise.all(completed.map(item => removeFromQueue(item.id)));
-}
-```
-
----
-
-### 5. Hapus Duplicate Auth Check di app.js
-
-**File**: `src/modules/app.js:22`
-
-**Masalah**: Dua kali pengecekan auth saat startup
-
-**Solusi**:
-```javascript
-// Sebelum
 const { data: { user }, error } = await getUser();
-if (user && !error) {
-  const { data: { session } } = await supabase.auth.getSession();
-  // ...
-}
+// Kemudian langsung:
+const { data: { session } } = await supabase.auth.getSession();
+```
 
-// Sesudah - gunakan getSession saja jika user sudah tersedia
+**Kode yang Diperbaiki**:
+```javascript
 const { data: { session }, error } = await supabase.auth.getSession();
 
 if (session && !error) {
+  // Session aktif, restore state
   await handleAuthChange('SIGNED_IN', session);
-} else {
-  // Check for magic link
-  const magicLinkProcessed = await handleMagicLinkCallback();
-  if (!magicLinkProcessed) {
-    router.navigate('login');
-  }
 }
 ```
 
+**Langkah-langkah**:
+1. Buka `src/modules/app.js`
+2. Hapus panggilan `getUser()` di baris 22
+3. Pertahankan hanya panggilan `getSession()`
+4. Update referensi apapun ke variabel `user`
+
 ---
 
-### 6. Optimasi Theme Toggle di login.js
+## Fase 2: Perbaikan Prioritas Sedang
 
-**File**: `src/pages/login.js:181`
+### 2.1 Optimasi Queue Cleanup di sync.js
+**File**: `src/modules/sync.js`
 
-**Masalah**: Manipulasi DOM berlebihan
-
-**Solusi**: Gunakan CSS classes:
+**Kode Saat Ini** (di uploadQueue.js - implementasi sebenarnya):
 ```javascript
-// Tambahkan class untuk dark mode
-function applyThemeDynamicallyLogin(isDark) {
-  const container = document.querySelector('.min-h-screen');
-  container.classList.toggle('dark-theme', isDark);
-  container.classList.toggle('light-theme', !isDark);
+export async function clearCompletedQueue() {
+  const db = await getDB();
+  const tx = db.transaction('uploadQueue', 'readwrite');
+  const index = tx.store.index('status');
+  const completed = await index.getAllKeys('success');
   
-  // Lebih sedikit manipulasi, biarkan CSS yanghandle
+  for (const key of completed) {
+    await tx.store.delete(key); // Sekuensial - tidak efisien
+  }
+  
+  return tx.done;
+}
+```
+
+**Kode yang Diperbaiki**:
+```javascript
+export async function clearCompletedQueue() {
+  const db = await getDB();
+  const tx = db.transaction('uploadQueue', 'readwrite');
+  const index = tx.store.index('status');
+  const completed = await index.getAllKeys('success');
+  
+  // Hapus semua secara paralel
+  await Promise.all(completed.map(key => tx.store.delete(key)));
+  
+  return tx.done;
 }
 ```
 
 ---
 
-## Prioritas Rendah
+### 2.2 Hapus Route batch Redundan
+**File**: `src/modules/router.js`
 
-### 7. Hapus Redundant Route di router.js
-
-**File**: `src/modules/router.js:23`
-
-**Masalah**: Route 'batch' dan 'capture' sama
-
-**Solusi**:
+**Kode Saat Ini**:
 ```javascript
-// Sebelum
-batch: {
-  render: renderCapture,
-  requiresAuth: true,
-},
-capture: {
-  render: renderCapture,
-  requiresAuth: true,
-},
-
-// Sesudah - redirect batch ke capture
 batch: {
   render: () => router.navigate('capture'),
   requiresAuth: true,
 },
 ```
 
----
+**Opsi A**: Hapus route entirely
+**Opsi B**: Jaga tapi ubah ke render langsung (direkomendasikan)
 
-## Jadwal Implementasi
+**Kode yang Diperbaiki**:
+```javascript
+// Hapus entry 'batch' dari routes object
+```
 
-| Minggu | Task | Status |
-|--------|------|--------|
-| 1 | #1 Fix appState di detail.js | [ ] |
-| 1 | #2 Error Handling di db.js | [ ] |
-| 2 | #3 Blob Cleanup di capture.js | [ ] |
-| 2 | #4 Queue Cleanup di sync.js | [ ] |
-| 3 | #5 Duplicate Auth di app.js | [ ] |
-| 3 | #6 Theme Toggle di login.js | [ ] |
-| 4 | #7 Redundant Route di router.js | [ ] |
-
----
-
-## Catatan
-
-- Semua perubahan harus diuji dengan `npm run lint` dan `npm run build`
-- Testing manual diperlukan untuk fitur kamera dan offline
-- Backup sebelum perubahan besar
+**Langkah-langkah**:
+1. Buka `src/modules/router.js`
+2. Hapus entri 'batch' dari object routes
+3. Test navigasi masih berfungsi
 
 ---
 
-*Dokumen ini dibuat berdasarkan hasil analisis kode*
+### 2.3 Perbaiki Performa Theme Toggle
+**File**: `src/pages/login.js`
+
+**Masalah**: Baris 201-293 mengupdate elemen secara individual
+
+**Solusi**: Gunakan toggling kelas CSS
+
+**Langkah-langkah**:
+1. Tambahkan kelas CSS untuk tema light/dark
+2. Ganti update elemen individual dengan toggling kelas
+3. Gunakan satu pemanggilan fungsi `applyTheme()`
+
+---
+
+## Fase 3: Perbaikan Prioritas Rendah
+
+### 3.1 Tambah Error Retry Logic ke API
+**File**: `src/modules/api.js`
+
+**Implementasi**:
+```javascript
+async function fetchWithRetry(fn, maxRetries = 3) {
+  let lastError;
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error;
+      if (i < maxRetries - 1) {
+        await new Promise(r => setTimeout(r, 1000 * Math.pow(2, i)));
+      }
+    }
+  }
+  throw lastError;
+}
+```
+
+---
+
+### 3.2 Tambah Unit Tests
+Buat file test untuk:
+- `tests/db.test.js` - Operasi IndexedDB
+- `tests/api.test.js` - Panggilan API
+- `tests/state.test.js` - Manajemen state
+
+---
+
+### 3.3 Migrasi TypeScript
+1. Install TypeScript: `npm install -D typescript`
+2. Buat `tsconfig.json`
+3. Rename file ke `.ts` secara progresif
+4. Tambahkan definisi tipe
+
+---
+
+## Timeline Implementasi
+
+| Fase | Tugas | Estimasi Waktu |
+|------|-------|----------------|
+| Fase 1 | 4 perbaikan kritis | 2 jam |
+| Fase 2 | 3 perbaikan sedang | 3 jam |
+| Fase 3 | 3 perbaikan rendah | 4 jam |
+
+**Total**: ~9 jam
+
+---
+
+## Checklist Verifikasi
+
+Setelah setiap perbaikan:
+- [ ] Jalankan aplikasi
+- [ ] Periksa console browser untuk error
+- [ ] Test fungsionalitas spesifik
+- [ ] Verifikasi tidak ada regresi
+
+---
+
+## Mitigasi Risiko
+
+1. **Backup**: Buat git branch sebelum membuat perubahan
+2. **Inkremental**: Buat satu perbaikan pada satu waktu
+3. **Pengujian**: Test setiap perbaikan secara individual
+4. **Rollback**: Simpan branch backup untuk quick rollback jika diperlukan
+
+---
+
+*Rencana dibuat: 2026-02-23*

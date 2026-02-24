@@ -127,7 +127,7 @@ async function loadSection(section) {
         }
         titleEl.textContent = 'Users';
         subtitleEl.textContent = 'Manage users and their roles';
-        addBtn.style.display = 'block';
+        addBtn.style.display = isOwner() ? 'block' : 'none';
         await renderUsers();
         break;
         
@@ -309,6 +309,7 @@ async function renderUsers() {
 function showUserForm(data = null) {
   const org = appState.get('organization');
   const isCurrentUserOwner = isOwner();
+  const isEditMode = !!data;
   
   // For owner: can select any organization
   // For manager: can only add users to their own organization
@@ -317,32 +318,48 @@ function showUserForm(data = null) {
   loadOrganizations.then(organizations => {
     const orgOptions = organizations.map(o => ({ value: o.id, label: o.name }));
     
+    // Determine if we should show role field
+    // Owner: always show role field
+    // Manager: only show role field when creating new user (not editing)
+    const showRoleField = isCurrentUserOwner || (!isEditMode);
+    
+    // Build fields array
+    const fields = [
+      { id: 'user-name', name: 'name', label: 'Name', required: true, placeholder: 'Enter user name' },
+      { id: 'user-email', name: 'email', label: 'Email (for new user)', required: !data, placeholder: 'user@example.com', type: 'email' }
+    ];
+    
+    // Add organization field for owner
+    if (isCurrentUserOwner) {
+      fields.push({
+        id: 'user-org',
+        name: 'organization_id',
+        label: 'Organization',
+        type: 'select',
+        required: true,
+        options: orgOptions
+      });
+    }
+    
+    // Add role field for owner OR when manager is creating new user
+    if (showRoleField) {
+      fields.push({
+        id: 'user-role',
+        name: 'role',
+        label: 'Role',
+        type: 'select',
+        required: true,
+        options: [
+          { value: 'staff', label: 'Staff' },
+          { value: 'manager', label: 'Manager' },
+          { value: 'owner', label: 'Owner' }
+        ]
+      });
+    }
+    
     showFormModal({
       title: data ? 'Edit User' : 'New User',
-      fields: [
-        { id: 'user-name', name: 'name', label: 'Name', required: true, placeholder: 'Enter user name' },
-        { id: 'user-email', name: 'email', label: 'Email (for new user)', required: !data, placeholder: 'user@example.com', type: 'email' },
-        ...(isCurrentUserOwner ? [{
-          id: 'user-org',
-          name: 'organization_id',
-          label: 'Organization',
-          type: 'select',
-          required: true,
-          options: orgOptions
-        }] : []),
-        ...(isCurrentUserOwner ? [{
-          id: 'user-role',
-          name: 'role',
-          label: 'Role',
-          type: 'select',
-          required: true,
-          options: [
-            { value: 'staff', label: 'Staff' },
-            { value: 'manager', label: 'Manager' },
-            { value: 'owner', label: 'Owner' }
-          ]
-        }] : [])
-      ],
+      fields: fields,
       initialData: data ? { 
         name: data.name,
         role: data.role,
@@ -350,9 +367,17 @@ function showUserForm(data = null) {
       } : { role: 'staff', organization_id: isCurrentUserOwner ? '' : org.id },
       onSubmit: async (formData) => {
         try {
+          // Validate organization_id for all users
+          if (!formData.organization_id) {
+            toastError('Please select an organization');
+            return;
+          }
+          
           if (data) {
+            // Preserve role if it was hidden (for managers editing users)
+            const updateData = showRoleField ? formData : { ...formData, role: data.role };
             // For managers, they can only update users in their organization
-            await adminUpdateUser(data.id, formData);
+            await adminUpdateUser(data.id, updateData);
             toastSuccess('User updated successfully');
           } else {
             // For new user, ensure organization_id is set

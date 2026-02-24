@@ -1,6 +1,12 @@
 -- Procurement System Database Schema
 -- Run this in Supabase SQL Editor
-
+--
+-- SECURITY NOTES:
+-- 1. All functions have SET search_path = '' to prevent privilege escalation
+-- 2. For leaked password protection: Enable it in Supabase Dashboard > Authentication > Providers > Email
+--    See: https://supabase.com/docs/guides/auth/password-security#password-strength-and-leaked-password-protection
+-- 3. Functions normalize_models_name and insert_procurement_image may exist in Supabase but not in this schema
+--
 -- Wrap all changes in transaction for atomic deployment
 BEGIN;
 
@@ -19,11 +25,15 @@ CREATE TABLE IF NOT EXISTS public.users (
   organization_id uuid REFERENCES public.organizations(id) ON DELETE CASCADE,
   role text NOT NULL CHECK (role IN ('owner', 'manager', 'staff')),
   name text,
+  email text UNIQUE,
   created_at timestamptz DEFAULT now()
 );
 
 -- Index for organization lookups
 CREATE INDEX IF NOT EXISTS idx_users_org ON public.users(organization_id);
+
+-- Index for email lookups
+CREATE INDEX IF NOT EXISTS idx_users_email ON public.users(email);
 
 -- ==================== Suppliers ====================
 
@@ -147,13 +157,16 @@ ALTER TABLE public.procurement_images ENABLE ROW LEVEL SECURITY;
 
 -- ==================== Function to create user on signup ====================
 
-DROP FUNCTION IF EXISTS public.handle_new_user();
+DROP FUNCTION IF EXISTS public.handle_new_user() CASCADE;
 
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
 DECLARE
   new_org_id uuid;
 BEGIN
+  -- Set secure search_path to prevent privilege escalation
+  SET search_path = '';
+  
   -- Check if user already exists (prevent duplicate on OAuth re-signup)
   IF EXISTS (SELECT 1 FROM public.users WHERE id = NEW.id) THEN
     RETURN NEW;
@@ -168,12 +181,13 @@ BEGIN
   RETURNING id INTO new_org_id;
   
   -- Create user profile
-  INSERT INTO public.users (id, organization_id, role, name)
+  INSERT INTO public.users (id, organization_id, role, name, email)
   VALUES (
     NEW.id,
     new_org_id,
     'owner',
-    COALESCE(NEW.raw_user_meta_data->>'name', 'User')
+    COALESCE(NEW.raw_user_meta_data->>'name', 'User'),
+    NEW.email
   );
   
   RETURN NEW;
@@ -188,15 +202,19 @@ CREATE TRIGGER on_auth_user_created
 
 -- ==================== Trigger function to set JWT claims ====================
 
-DROP FUNCTION IF EXISTS public.set_claims();
+DROP FUNCTION IF EXISTS public.set_claims() CASCADE;
 
 CREATE OR REPLACE FUNCTION public.set_claims()
 RETURNS TRIGGER AS $$
 BEGIN
+  -- Set secure search_path to prevent privilege escalation
+  SET search_path = '';
+  
   UPDATE auth.users
   SET 
     raw_app_meta_data = COALESCE(raw_app_meta_data, '{}'::jsonb) || jsonb_build_object(
-      'organization_id', (SELECT organization_id FROM public.users WHERE id = NEW.id)
+      'organization_id', (SELECT organization_id FROM public.users WHERE id = NEW.id),
+      'role', (SELECT role FROM public.users WHERE id = NEW.id)
     ),
     raw_user_meta_data = COALESCE(raw_user_meta_data, '{}'::jsonb) || jsonb_build_object(
       'organization_id', (SELECT organization_id FROM public.users WHERE id = NEW.id),
@@ -219,9 +237,18 @@ DROP FUNCTION IF EXISTS public.get_user_role_in_org(uuid) CASCADE;
 
 CREATE OR REPLACE FUNCTION public.get_user_role_in_org(org_id uuid)
 RETURNS text AS $$
-  SELECT role FROM public.users 
-  WHERE id = auth.uid() AND organization_id = org_id;
-$$ LANGUAGE sql SECURITY DEFINER;
+DECLARE
+  r text;
+BEGIN
+  -- Set secure search_path to prevent privilege escalation
+  PERFORM set_config('search_path', '', true);
+  
+  SELECT role INTO r FROM public.users 
+  WHERE id = (select auth.uid()) AND organization_id = org_id;
+  
+  RETURN r;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- ==================== Updated RLS Policies ====================
 
@@ -287,184 +314,229 @@ DROP POLICY IF EXISTS "update_last_accessed" ON procurement_images;
 
 -- ==================== Organizations Policies ====================
 
+-- Drop existing policies first
+DROP POLICY IF EXISTS "org_select_same_org" ON public.organizations;
+DROP POLICY IF EXISTS "org_insert_owner_or_super" ON public.organizations;
+DROP POLICY IF EXISTS "org_update_owner_or_super" ON public.organizations;
+DROP POLICY IF EXISTS "org_delete_owner_or_super" ON public.organizations;
+
 -- Organizations: Only same organization members can read
 CREATE POLICY "org_select_same_org" ON public.organizations
   FOR SELECT USING (
-    ((auth.jwt() ->> 'organization_id')::uuid = id) OR
-    EXISTS (SELECT 1 FROM users u WHERE u.id = auth.uid() AND u.organization_id = organizations.id) OR
-    auth.role() = 'service_role'
+    ((select auth.jwt() -> 'app_metadata' ->> 'organization_id')::uuid = id) OR
+    EXISTS (SELECT 1 FROM users u WHERE u.id = (select auth.uid()) AND u.organization_id = organizations.id) OR
+    (select auth.role()) = 'service_role'
   );
 
 -- Organizations: Only owner or super_admin can insert
 CREATE POLICY "org_insert_owner_or_super" ON public.organizations
   FOR INSERT WITH CHECK (
-    (get_user_role_in_org((auth.jwt() ->> 'organization_id')::uuid) = 'owner') OR
-    ((auth.jwt() ->> 'user_role') = 'super_admin') OR
-    auth.role() = 'service_role'
+    (get_user_role_in_org((select auth.jwt() -> 'app_metadata' ->> 'organization_id')::uuid) = 'owner') OR
+    (select auth.jwt() -> 'app_metadata' ->> 'role') = 'super_admin' OR
+    (select auth.role()) = 'service_role'
   );
 
 -- Organizations: Only owner or super_admin can update
 CREATE POLICY "org_update_owner_or_super" ON public.organizations
   FOR UPDATE USING (
     (get_user_role_in_org(id) = 'owner') OR
-    ((auth.jwt() ->> 'user_role') = 'super_admin') OR
-    auth.role() = 'service_role'
+    (select auth.jwt() -> 'app_metadata' ->> 'role') = 'super_admin' OR
+    (select auth.role()) = 'service_role'
   );
 
 -- Organizations: Only owner or super_admin can delete
 CREATE POLICY "org_delete_owner_or_super" ON public.organizations
   FOR DELETE USING (
     (get_user_role_in_org(id) = 'owner') OR
-    ((auth.jwt() ->> 'user_role') = 'super_admin') OR
-    auth.role() = 'service_role'
+    (select auth.jwt() -> 'app_metadata' ->> 'role') = 'super_admin' OR
+    (select auth.role()) = 'service_role'
   );
 
 -- ==================== Users Policies ====================
 
+-- Drop existing policies first
+DROP POLICY IF EXISTS "users_select_same_org" ON public.users;
+DROP POLICY IF EXISTS "users_insert_same_org" ON public.users;
+DROP POLICY IF EXISTS "users_update_own" ON public.users;
+DROP POLICY IF EXISTS "users_delete_own" ON public.users;
+
 CREATE POLICY "users_select_same_org" ON public.users
   FOR SELECT USING (
     (
-      organization_id = ((auth.jwt() ->> 'organization_id')::uuid)
-      OR id = (SELECT auth.uid())
+      organization_id = ((select auth.jwt() -> 'app_metadata' ->> 'organization_id')::uuid)
+      OR id = (SELECT (select auth.uid()))
     ) OR
-    auth.role() = 'service_role'
+    (select auth.jwt() -> 'app_metadata' ->> 'role') IN ('owner', 'super_admin') OR
+    (select auth.role()) = 'service_role'
   );
 
 CREATE POLICY "users_insert_same_org" ON public.users
   FOR INSERT WITH CHECK (
     (
-      organization_id = ((auth.jwt() ->> 'organization_id')::uuid)
-      AND id = (SELECT auth.uid())
+      organization_id = ((select auth.jwt() -> 'app_metadata' ->> 'organization_id')::uuid)
+      AND id = (SELECT (select auth.uid()))
     ) OR
-    auth.role() = 'service_role'
+    (select auth.jwt() -> 'app_metadata' ->> 'role') IN ('owner', 'super_admin') OR
+    (select auth.role()) = 'service_role'
   );
 
 CREATE POLICY "users_update_own" ON public.users
   FOR UPDATE USING (
     (
-      id = (SELECT auth.uid())
-      AND organization_id = ((auth.jwt() ->> 'organization_id')::uuid)
+      id = (SELECT (select auth.uid()))
+      AND organization_id = ((select auth.jwt() -> 'app_metadata' ->> 'organization_id')::uuid)
     ) OR
-    auth.role() = 'service_role'
+    (select auth.jwt() -> 'app_metadata' ->> 'role') IN ('owner', 'super_admin') OR
+    (select auth.role()) = 'service_role'
   );
 
 CREATE POLICY "users_delete_own" ON public.users
   FOR DELETE USING (
     (
-      id = (SELECT auth.uid())
-      AND organization_id = ((auth.jwt() ->> 'organization_id')::uuid)
+      id = (SELECT (select auth.uid()))
+      AND organization_id = ((select auth.jwt() -> 'app_metadata' ->> 'organization_id')::uuid)
     ) OR
-    auth.role() = 'service_role'
+    (select auth.jwt() -> 'app_metadata' ->> 'role') IN ('owner', 'super_admin') OR
+    (select auth.role()) = 'service_role'
   );
 
 -- ==================== Suppliers Policies ====================
 
+-- Drop existing policies first
+DROP POLICY IF EXISTS "suppliers_select_same_org" ON public.suppliers;
+DROP POLICY IF EXISTS "suppliers_insert_same_org" ON public.suppliers;
+DROP POLICY IF EXISTS "suppliers_update_same_org" ON public.suppliers;
+DROP POLICY IF EXISTS "suppliers_delete_same_org" ON public.suppliers;
+
 CREATE POLICY "suppliers_select_same_org" ON public.suppliers
   FOR SELECT USING (
-    organization_id = ((auth.jwt() ->> 'organization_id')::uuid) OR
-    auth.role() = 'service_role'
+    organization_id = ((select auth.jwt() -> 'app_metadata' ->> 'organization_id')::uuid) OR
+    (select auth.jwt() -> 'app_metadata' ->> 'role') = 'owner' OR
+    (select auth.role()) = 'service_role'
   );
 
 CREATE POLICY "suppliers_insert_same_org" ON public.suppliers
   FOR INSERT WITH CHECK (
-    organization_id = ((auth.jwt() ->> 'organization_id')::uuid) OR
-    auth.role() = 'service_role'
+    organization_id = ((select auth.jwt() -> 'app_metadata' ->> 'organization_id')::uuid) OR
+    (select auth.jwt() -> 'app_metadata' ->> 'role') = 'owner' OR
+    (select auth.role()) = 'service_role'
   );
 
 CREATE POLICY "suppliers_update_same_org" ON public.suppliers
   FOR UPDATE USING (
-    organization_id = ((auth.jwt() ->> 'organization_id')::uuid) OR
-    auth.role() = 'service_role'
+    organization_id = ((select auth.jwt() -> 'app_metadata' ->> 'organization_id')::uuid) OR
+    (select auth.jwt() -> 'app_metadata' ->> 'role') = 'owner' OR
+    (select auth.role()) = 'service_role'
   );
 
 CREATE POLICY "suppliers_delete_same_org" ON public.suppliers
   FOR DELETE USING (
-    organization_id = ((auth.jwt() ->> 'organization_id')::uuid) OR
-    auth.role() = 'service_role'
+    organization_id = ((select auth.jwt() -> 'app_metadata' ->> 'organization_id')::uuid) OR
+    (select auth.jwt() -> 'app_metadata' ->> 'role') = 'owner' OR
+    (select auth.role()) = 'service_role'
   );
 
 -- ==================== Models Policies ====================
 
+-- Drop existing policies first
+DROP POLICY IF EXISTS "models_select_same_org" ON public.models;
+DROP POLICY IF EXISTS "models_insert_same_org" ON public.models;
+DROP POLICY IF EXISTS "models_update_same_org" ON public.models;
+DROP POLICY IF EXISTS "models_delete_same_org" ON public.models;
+
 CREATE POLICY "models_select_same_org" ON public.models
   FOR SELECT USING (
-    organization_id = ((auth.jwt() ->> 'organization_id')::uuid) OR
-    auth.role() = 'service_role'
+    organization_id = ((select auth.jwt() -> 'app_metadata' ->> 'organization_id')::uuid) OR
+    (select auth.role()) = 'service_role'
   );
 
 CREATE POLICY "models_insert_same_org" ON public.models
   FOR INSERT WITH CHECK (
-    organization_id = ((auth.jwt() ->> 'organization_id')::uuid) OR
-    auth.role() = 'service_role'
+    organization_id = ((select auth.jwt() -> 'app_metadata' ->> 'organization_id')::uuid) OR
+    (select auth.role()) = 'service_role'
   );
 
 CREATE POLICY "models_update_same_org" ON public.models
   FOR UPDATE USING (
-    organization_id = ((auth.jwt() ->> 'organization_id')::uuid) OR
-    auth.role() = 'service_role'
+    organization_id = ((select auth.jwt() -> 'app_metadata' ->> 'organization_id')::uuid) OR
+    (select auth.role()) = 'service_role'
   );
 
 CREATE POLICY "models_delete_same_org" ON public.models
   FOR DELETE USING (
-    organization_id = ((auth.jwt() ->> 'organization_id')::uuid) OR
-    auth.role() = 'service_role'
+    organization_id = ((select auth.jwt() -> 'app_metadata' ->> 'organization_id')::uuid) OR
+    (select auth.role()) = 'service_role'
   );
 
 -- ==================== Procurement Policies ====================
 
+-- Drop existing policies first
+DROP POLICY IF EXISTS "procurement_select_same_org" ON public.procurement;
+DROP POLICY IF EXISTS "procurement_insert_same_org" ON public.procurement;
+DROP POLICY IF EXISTS "procurement_no_update" ON public.procurement;
+DROP POLICY IF EXISTS "procurement_no_delete" ON public.procurement;
+
 CREATE POLICY "procurement_select_same_org" ON public.procurement
   FOR SELECT USING (
-    organization_id = ((auth.jwt() ->> 'organization_id')::uuid) OR
-    auth.role() = 'service_role'
+    organization_id = ((select auth.jwt() -> 'app_metadata' ->> 'organization_id')::uuid) OR
+    (select auth.role()) = 'service_role'
   );
 
 CREATE POLICY "procurement_insert_same_org" ON public.procurement
   FOR INSERT WITH CHECK (
-    organization_id = ((auth.jwt() ->> 'organization_id')::uuid) OR
-    auth.role() = 'service_role'
+    organization_id = ((select auth.jwt() -> 'app_metadata' ->> 'organization_id')::uuid) OR
+    (select auth.role()) = 'service_role'
   );
 
 -- Procurement records are immutable - only service_role can update/delete
 CREATE POLICY "procurement_no_update" ON public.procurement
-  FOR UPDATE USING (auth.role() = 'service_role');
+  FOR UPDATE USING ((select auth.role()) = 'service_role');
 
 CREATE POLICY "procurement_no_delete" ON public.procurement
-  FOR DELETE USING (auth.role() = 'service_role');
+  FOR DELETE USING ((select auth.role()) = 'service_role');
 
 -- ==================== Procurement Images Policies ====================
+
+-- Drop existing policies first
+DROP POLICY IF EXISTS "procurement_images_select_same_org" ON public.procurement_images;
+DROP POLICY IF EXISTS "procurement_images_insert_same_org" ON public.procurement_images;
+DROP POLICY IF EXISTS "procurement_images_no_update" ON public.procurement_images;
+DROP POLICY IF EXISTS "procurement_images_no_delete" ON public.procurement_images;
+DROP POLICY IF EXISTS "update_last_accessed" ON public.procurement_images;
 
 CREATE POLICY "procurement_images_select_same_org" ON public.procurement_images
   FOR SELECT USING (
     (
-      organization_id = ((auth.jwt() ->> 'organization_id')::uuid)
+      organization_id = ((select auth.jwt() -> 'app_metadata' ->> 'organization_id')::uuid)
       AND archived = false
     ) OR
-    auth.role() = 'service_role'
+    (select auth.role()) = 'service_role'
   );
 
 CREATE POLICY "procurement_images_insert_same_org" ON public.procurement_images
   FOR INSERT WITH CHECK (
-    organization_id = ((auth.jwt() ->> 'organization_id')::uuid) OR
-    auth.role() = 'service_role'
+    organization_id = ((select auth.jwt() -> 'app_metadata' ->> 'organization_id')::uuid) OR
+    (select auth.role()) = 'service_role'
   );
 
 -- Images cannot be updated or deleted by regular users (service role only)
 CREATE POLICY "procurement_images_no_update" ON public.procurement_images
-  FOR UPDATE USING (auth.role() = 'service_role');
+  FOR UPDATE USING ((select auth.role()) = 'service_role');
 
 CREATE POLICY "procurement_images_no_delete" ON public.procurement_images
-  FOR DELETE USING (auth.role() = 'service_role');
+  FOR DELETE USING ((select auth.role()) = 'service_role');
 
 CREATE POLICY "update_last_accessed" ON public.procurement_images
   FOR UPDATE USING (
-    organization_id = ((auth.jwt() ->> 'organization_id')::uuid) OR
-    auth.role() = 'service_role'
+    organization_id = ((select auth.jwt() -> 'app_metadata' ->> 'organization_id')::uuid) OR
+    (select auth.role()) = 'service_role'
   )
   WITH CHECK (
     (
-      organization_id = ((auth.jwt() ->> 'organization_id')::uuid)
+      organization_id = ((select auth.jwt() -> 'app_metadata' ->> 'organization_id')::uuid)
       AND last_accessed_at IS NOT NULL
     ) OR
-    auth.role() = 'service_role'
+    (select auth.role()) = 'service_role'
   );
 
 -- ==================== Audit Logs ====================
@@ -491,24 +563,63 @@ CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON public.audit_logs(created_a
 ALTER TABLE public.audit_logs ENABLE ROW LEVEL SECURITY;
 
 -- Audit logs: Organization-based access
+-- Drop existing policies first
+DROP POLICY IF EXISTS "audit_logs_select_same_org" ON public.audit_logs;
+DROP POLICY IF EXISTS "audit_logs_insert_same_org" ON public.audit_logs;
+DROP POLICY IF EXISTS "audit_logs_no_update" ON public.audit_logs;
+DROP POLICY IF EXISTS "audit_logs_no_delete" ON public.audit_logs;
+
 CREATE POLICY "audit_logs_select_same_org" ON public.audit_logs
   FOR SELECT USING (
-    organization_id = ((auth.jwt() ->> 'organization_id')::uuid) OR
-    auth.role() = 'service_role'
+    organization_id = ((select auth.jwt() -> 'app_metadata' ->> 'organization_id')::uuid) OR
+    (select auth.role()) = 'service_role'
   );
 
 -- Audit logs: Insert for organization members
 CREATE POLICY "audit_logs_insert_same_org" ON public.audit_logs
   FOR INSERT WITH CHECK (
-    organization_id = ((auth.jwt() ->> 'organization_id')::uuid) OR
-    auth.role() = 'service_role'
+    organization_id = ((select auth.jwt() -> 'app_metadata' ->> 'organization_id')::uuid) OR
+    (select auth.role()) = 'service_role'
   );
 
 -- Audit logs: No update or delete
 CREATE POLICY "audit_logs_no_update" ON public.audit_logs
-  FOR UPDATE USING (auth.role() = 'service_role');
+  FOR UPDATE USING ((select auth.role()) = 'service_role');
 
 CREATE POLICY "audit_logs_no_delete" ON public.audit_logs
-  FOR DELETE USING (auth.role() = 'service_role');
+  FOR DELETE USING ((select auth.role()) = 'service_role');
+
+-- ==================== Cleanup Duplicate Indexes ====================
+-- These indexes may exist from previous migrations, drop duplicates
+
+-- Models duplicate indexes
+DROP INDEX IF EXISTS idx_models_organization_id;
+DROP INDEX IF EXISTS ux_models_org_normalized_name;
+
+-- Procurement duplicate indexes
+DROP INDEX IF EXISTS idx_procurement_captured_at_desc;
+DROP INDEX IF EXISTS idx_procurement_model_id;
+DROP INDEX IF EXISTS idx_procurement_organization_id;
+DROP INDEX IF EXISTS idx_procurement_supplier_id;
+
+-- Procurement Images duplicate indexes
+DROP INDEX IF EXISTS idx_proc_img_org;
+DROP INDEX IF EXISTS idx_proc_img_proc;
+DROP INDEX IF EXISTS uniq_procurement_variant;
+
+-- Suppliers duplicate index
+DROP INDEX IF EXISTS idx_suppliers_organization_id;
+
+-- Users duplicate index
+DROP INDEX IF EXISTS idx_users_organization_id;
+
+-- ==================== Remove Extra Policies (fix multiple_permissive_policies) ====================
+-- These policies exist in the database but cause multiple permissive policy warnings
+-- Drop them to fix the performance issue
+
+DROP POLICY IF EXISTS "insert own images" ON public.procurement_images;
+DROP POLICY IF EXISTS "select own images" ON public.procurement_images;
+DROP POLICY IF EXISTS "delete_by_service_only" ON public.procurement_images;
+DROP POLICY IF EXISTS "update_by_service_only" ON public.procurement_images;
 
 COMMIT;

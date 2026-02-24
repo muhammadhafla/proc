@@ -1,0 +1,60 @@
+# Cloudflare Pages Headers Configuration
+# Proper MIME types and caching for static assets
+
+# Cache static assets
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# MIME types for JavaScript
+/*.js
+  Content-Type: application/javascript; charset=utf-8
+
+# MIME types for CSS
+/*.css
+  Content-Type: text/css; charset=utf-8
+
+# MIME types for images
+/*.png
+  Content-Type: image/png
+
+/*.jpg
+  Content-Type: image/jpeg
+
+/*.jpeg
+  Content-Type: image/jpeg
+
+/*.gif
+  Content-Type: image/gif
+
+/*.svg
+  Content-Type: image/svg+xml
+
+/*.ico
+  Content-Type: image/x-icon
+
+# MIME types for fonts
+/*.woff
+  Content-Type: font/woff
+
+/*.woff2
+  Content-Type: font/woff2
+
+/*.ttf
+  Content-Type: font/ttf
+
+/*.eot
+  Content-Type: application/vnd.ms-fontobject
+
+# HTML files - no cache for SPA
+/*.html
+  Cache-Control: public, max-age=0, must-revalidate
+  Content-Type: text/html; charset=utf-8
+
+# Root index.html
+/index.html
+  Cache-Control: public, max-age=0, must-revalidate
+  Content-Type: text/html; charset=utf-8
+
+# Manifest
+/manifest.json
+  Content-Type: application/manifest+json; charset=utf-8
