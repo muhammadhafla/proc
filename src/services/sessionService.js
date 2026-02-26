@@ -252,8 +252,56 @@ async function validateSession() {
     const { data, error } = await supabase.rpc('get_session_status');
     
     if (error) {
+      console.warn('Session validation RPC failed:', error);
+      
+      // Check if this is a 400 error (RPC function not found or bad request)
+      // In this case, we should NOT blindly trust the local token
+      const isRpcError = error.message?.includes('400') || error.code === '400';
+      
+      if (isRpcError) {
+        // RPC function issue - try to refresh the session to verify it's valid
+        console.log('[SessionService] RPC returned 400, attempting session refresh to verify...');
+        try {
+          const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
+          
+          if (refreshError || !refreshData.session) {
+            // Refresh failed - session is definitely invalid
+            console.log('[SessionService] Session refresh failed, session is invalid');
+            return {
+              isValid: false,
+              userId: null,
+              email: null,
+              expiresAt: null,
+              expiresInSeconds: 0,
+              reason: 'Server validation failed and session refresh failed',
+            };
+          }
+          
+          // Refresh succeeded - session is valid
+          console.log('[SessionService] Session refreshed successfully, session is valid');
+          return {
+            isValid: true,
+            userId: refreshData.session.user.id,
+            email: refreshData.session.user.email,
+            expiresAt: new Date(refreshData.session.expires_at * 1000),
+            expiresInSeconds: refreshData.session.expires_in,
+            reason: 'Session validated via refresh',
+          };
+        } catch (refreshCatchError) {
+          console.error('[SessionService] Session refresh threw error:', refreshCatchError);
+          return {
+            isValid: false,
+            userId: null,
+            email: null,
+            expiresAt: null,
+            expiresInSeconds: 0,
+            reason: 'Server validation failed: ' + error.message,
+          };
+        }
+      }
+      
+      // For other errors (network issues, etc.), fallback to local check
       console.warn('Session validation RPC failed, using local check:', error);
-      // Fallback to local session check
       const { data: { user } } = await supabase.auth.getUser();
       
       return {

@@ -49,7 +49,7 @@ export async function getOrCreateSupplier(name) {
   const supplierId = uuidv4();
   
   try {
-    const organizationId = window.appState?.organization?.id;
+    const organizationId = window.appState.get('organization')?.id;
     if (!organizationId) {
       throw new Error('No organization found. Please sign out and sign in again.');
     }
@@ -109,7 +109,7 @@ export async function getOrCreateModel(name) {
   const modelId = uuidv4();
   
   try {
-    const organizationId = window.appState?.organization?.id;
+    const organizationId = window.appState.get('organization')?.id;
     if (!organizationId) {
       throw new Error('No organization found. Please sign out and sign in again.');
     }

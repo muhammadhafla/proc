@@ -304,7 +304,7 @@ function getCurrentOrgId() {
   // Try multiple sources for organization ID
   try {
     // From appState
-    const org = window.appState?.organization;
+    const org = window.appState.get('organization');
     if (org?.id) return org.id;
     
     // From localStorage
@@ -321,7 +321,7 @@ function getCurrentOrgId() {
 
 function getCurrentUserId() {
   try {
-    const user = window.appState?.user;
+    const user = window.appState.get('user');
     if (user?.id) return user.id;
     
     const stored = localStorage.getItem('user');

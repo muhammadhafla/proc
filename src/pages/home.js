@@ -3,8 +3,9 @@ import { router } from '../modules/router.js';
 import { getAllQueueItems } from '../modules/db.js';
 import { appState } from '../modules/state.js';
 import { renderBottomNav, getCurrentTheme, toggleTheme, renderThemeToggle, initTheme, applyTheme } from '../modules/theme.js';
-import { hasAdminAccess, signOut } from '../modules/api.js';
+import { hasAdminAccess, signOut, clearUserCache } from '../modules/api.js';
 import { showConfirm } from '../components/admin/Modal.js';
+import { pauseSessionManagement } from '../modules/sessionManager.js';
 
 /**
  * Render home page
@@ -147,9 +148,26 @@ export async function renderHome(container) {
         // Ignore error if no active session
         console.log('Logout:', e.message);
       }
+      
+      // Pause session management to prevent periodic checks from interfering
+      pauseSessionManagement();
+      
+      // Clear user cache in api.js
+      clearUserCache();
+      
+      // Clear localStorage backup
+      localStorage.removeItem('user');
+      localStorage.removeItem('organization');
+      
+      // Clear sessionStorage
+      sessionStorage.removeItem('intendedRoute');
+      sessionStorage.removeItem('sessionRedirect');
+      
       // Explicitly clear app state before navigating
       appState.set('user', null);
       appState.set('organization', null);
+      
+      // Navigate to login
       router.navigate('login');
     }
   });

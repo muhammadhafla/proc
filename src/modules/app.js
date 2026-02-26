@@ -140,6 +140,8 @@ async function handleMagicLinkCallback() {
 async function handleAuthChange(event, session) {
   if (event === 'SIGNED_IN' && session) {
     appState.set('user', session.user);
+    // Also persist to localStorage for fallback
+    localStorage.setItem('user', JSON.stringify(session.user));
     
     // Resume session management after login
     await resumeSessionManagement();
@@ -149,6 +151,8 @@ async function handleAuthChange(event, session) {
       const organization = await getOrganization();
       if (organization) {
         appState.set('organization', organization);
+        // Also persist to localStorage for fallback
+        localStorage.setItem('organization', JSON.stringify(organization));
         console.log('User logged in:', session.user.email, '| Org:', organization.name, '| Role:', organization.userRole);
       }
     } catch (error) {
@@ -198,6 +202,10 @@ async function handleAuthChange(event, session) {
   } else if (event === 'SIGNED_OUT') {
     appState.set('user', null);
     appState.set('organization', null);
+    
+    // Clear localStorage backup
+    localStorage.removeItem('user');
+    localStorage.removeItem('organization');
     
     // Pause session management on logout
     pauseSessionManagement();

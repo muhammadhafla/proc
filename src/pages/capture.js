@@ -277,7 +277,7 @@ function setupSupplierDropdown() {
     if (filtered.length === 0) {
       supplierList.innerHTML = `
         <div class="px-4 py-6 text-gray-400 text-sm text-center">
-          ${suppliers.length === 0 ? 'Belum ada supplier' : 'Tidak ada hasil'}
+          ${suppliers.length === 0 ? 'Belum ada supplier. Hubungi admin untuk menambah supplier.' : 'Tidak ada hasil'}
         </div>
       `;
       return;
@@ -382,7 +382,14 @@ async function captureImage() {
   
   // Validation - done BEFORE capture
   if (!supplier) {
-    showNotification('Please enter supplier name', 'error');
+    showNotification('Pilih supplier dari daftar', 'error');
+    supplierInput.focus();
+    return;
+  }
+  
+  // Check if supplier was selected from list (not typed manually)
+  if (!supplierInput.dataset.supplierId) {
+    showNotification('Pilih supplier dari daftar yang tersedia', 'error');
     supplierInput.focus();
     return;
   }
@@ -459,7 +466,14 @@ async function saveCapture(continueBatch = false) {
   
   // Validation
   if (!supplier) {
-    showNotification('Please enter supplier name', 'error');
+    showNotification('Pilih supplier dari daftar', 'error');
+    supplierInput.focus();
+    return;
+  }
+  
+  // Check if supplier was selected from list (not typed manually)
+  if (!supplierInput.dataset.supplierId) {
+    showNotification('Pilih supplier dari daftar yang tersedia', 'error');
     supplierInput.focus();
     return;
   }
@@ -478,8 +492,8 @@ async function saveCapture(continueBatch = false) {
   continueBtn.textContent = 'Saving...';
   
   try {
-    // Get or create supplier using shared data service
-    const supplierId = await getOrCreateSupplier(supplier);
+    // Use supplier ID directly from selected supplier (already validated)
+    const supplierId = supplierInput.dataset.supplierId;
     
     // Get or create model using shared data service
     const modelId = await getOrCreateModel(model);
