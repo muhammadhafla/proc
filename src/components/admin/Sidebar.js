@@ -1,6 +1,8 @@
 // Sidebar Component
 import { router } from '../../modules/router.js';
 import { signOut } from '../../modules/api.js';
+import { appState } from '../../modules/state.js';
+import { showConfirm } from '../../components/admin/Modal.js';
 
 /**
  * Create admin sidebar
@@ -10,7 +12,7 @@ import { signOut } from '../../modules/api.js';
  */
 export function createSidebar(userRole, onNavigate) {
   const sidebar = document.createElement('aside');
-  sidebar.className = 'w-64 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex flex-col h-full';
+  sidebar.className = `admin-sidebar fixed lg:relative z-40 lg:z-auto inset-y-0 left-0 transform -translate-x-full lg:translate-x-0 transition-transform duration-300 ease-in-out w-64 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex flex-col h-full`;
   
   const isOwner = userRole === 'owner';
   
@@ -29,9 +31,20 @@ export function createSidebar(userRole, onNavigate) {
   );
   
   sidebar.innerHTML = `
-    <div class="p-4 border-b border-gray-200 dark:border-gray-700">
-      <h2 class="text-xl font-bold text-gray-900 dark:text-white">Admin Console</h2>
-      <p class="text-sm text-gray-500 dark:text-gray-400 capitalize">${userRole} Panel</p>
+    <!-- Mobile overlay -->
+    <div class="sidebar-overlay hidden fixed inset-0 bg-black/50 z-30 lg:hidden" id="sidebar-overlay"></div>
+    
+    <div class="p-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+      <div>
+        <h2 class="text-xl font-bold text-gray-900 dark:text-white">Admin</h2>
+        <p class="text-sm text-gray-500 dark:text-gray-400 capitalize">${userRole}</p>
+      </div>
+      <!-- Mobile close button -->
+      <button id="sidebar-close" class="lg:hidden p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700">
+        <svg class="w-5 h-5 text-gray-600 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+        </svg>
+      </button>
     </div>
     
     <nav class="flex-1 p-4 overflow-y-auto">
@@ -50,7 +63,7 @@ export function createSidebar(userRole, onNavigate) {
       </ul>
     </nav>
     
-    <div class="p-4 border-t border-gray-200 dark:border-gray-700">
+    <div class="p-4 border-t border-gray-200 dark:border-gray-700 space-y-2">
       <button id="sidebar-logout" class="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/>
@@ -77,33 +90,67 @@ export function createSidebar(userRole, onNavigate) {
       });
       btn.classList.add('bg-primary-50', 'dark:bg-primary-900/20', 'text-primary-600', 'dark:text-primary-400');
       
+      // Close sidebar on mobile after selection
+      closeSidebar();
+      
       if (onNavigate) onNavigate(section);
     });
   });
   
+  // Mobile sidebar close handler
+  sidebar.querySelector('#sidebar-close')?.addEventListener('click', closeSidebar);
+  sidebar.querySelector('#sidebar-overlay')?.addEventListener('click', closeSidebar);
+  
   // Add logout and back button handlers
   sidebar.querySelector('#sidebar-logout')?.addEventListener('click', async () => {
-    if (confirm('Are you sure you want to logout?')) {
+    // Close sidebar on mobile
+    closeSidebar();
+    
+    const confirmed = await showConfirm('Konfirmasi Keluar', 'Apakah Anda yakin ingin keluar dari aplikasi?', 'Keluar', 'btn btn-danger');
+    if (confirmed) {
       try {
         await signOut();
       } catch (e) {
-        // Ignore error if no active session, but log unexpected errors
         if (e.message?.includes('No active session')) {
           console.log('Logout: No active session');
         } else {
           console.error('Logout error:', e);
         }
       }
-      // Navigate to login page after logout
+      appState.set('user', null);
+      appState.set('organization', null);
       router.navigate('login');
     }
   });
   
   sidebar.querySelector('#sidebar-back')?.addEventListener('click', () => {
+    closeSidebar();
     router.navigate('home');
   });
   
   return sidebar;
+}
+
+/**
+ * Open sidebar (for mobile)
+ */
+export function openSidebar() {
+  const sidebar = document.querySelector('.admin-sidebar');
+  if (sidebar) {
+    sidebar.classList.remove('-translate-x-full');
+    document.body.style.overflow = 'hidden';
+  }
+}
+
+/**
+ * Close sidebar (for mobile)
+ */
+export function closeSidebar() {
+  const sidebar = document.querySelector('.admin-sidebar');
+  if (sidebar) {
+    sidebar.classList.add('-translate-x-full');
+    document.body.style.overflow = '';
+  }
 }
 
 /**

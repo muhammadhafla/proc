@@ -16,6 +16,10 @@ export function renderLogin(container, params = {}) {
   // Get auth error if present
   const authError = params?.authError;
   
+  // Get redirect parameter (from session expiry)
+  const redirectParam = params?.redirect || null;
+  const sessionExpiredReason = params?.reason === 'session_expired';
+  
   // Map error codes to user-friendly messages
   const errorMessages = {
     'otp_expired': {
@@ -92,6 +96,22 @@ export function renderLogin(container, params = {}) {
         </div>
         ` : ''}
         
+        <!-- Session Expired Notice -->
+        ${sessionExpiredReason ? `
+        <div class="mb-6 p-4 bg-yellow-50 dark:bg-yellow-900/30 border border-yellow-200 dark:border-yellow-800 rounded-lg" role="alert">
+          <div class="flex items-start gap-3">
+            <svg class="w-5 h-5 text-yellow-500 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+            </svg>
+            <div>
+              <h3 class="text-sm font-semibold text-yellow-800 dark:text-yellow-400">Session Ended</h3>
+              <p class="text-sm text-yellow-700 dark:text-yellow-300 mt-1">Your previous session has expired. Please log in again to continue working.</p>
+              ${redirectParam ? `<p class="text-xs text-yellow-600 dark:text-yellow-400 mt-2">You will be redirected to <strong>${redirectParam}</strong> after logging in.</p>` : ''}
+            </div>
+          </div>
+        </div>
+        ` : ''}
+        
         <!-- Login Form -->
         <div class="card ${isDark ? 'bg-gray-800 border-gray-700' : ''}">
           <form id="login-form" class="space-y-4" aria-label="Sign in form">
@@ -135,6 +155,11 @@ export function renderLogin(container, params = {}) {
     </div>
   `;
   
+  // Store redirect param in sessionStorage for post-login redirect
+  if (redirectParam) {
+    sessionStorage.setItem('sessionRedirect', redirectParam);
+  }
+  
   // Setup form handler
   const form = document.getElementById('login-form');
   form.addEventListener('submit', handleLogin);
@@ -152,25 +177,39 @@ export function renderLogin(container, params = {}) {
 async function handleLogin(event) {
   event.preventDefault();
   
+  const form = event.target;
   const email = document.getElementById('email').value.trim();
-  const button = event.target.querySelector('button');
+  const button = form.querySelector('button');
+  
+  // Prevent duplicate submissions
+  if (button.disabled || button.dataset.submitting === 'true') {
+    return;
+  }
   
   if (!email) {
     showNotification('Please enter your email', 'error');
     return;
   }
   
-  // Show loading state
+  // Show loading state and prevent duplicate clicks
   button.disabled = true;
+  button.dataset.submitting = 'true';
   button.textContent = 'Sending...';
   
   try {
     await signInWithEmail(email);
     
-    showNotification('Magic link sent! Check your email.', 'success');
-    
-    // Update button
+    // Mark as successfully submitted to prevent re-submission
+    button.dataset.submitted = 'true';
     button.textContent = 'Email Sent!';
+    
+    // Disable the email input as well
+    const emailInput = document.getElementById('email');
+    if (emailInput) {
+      emailInput.disabled = true;
+    }
+    
+    showNotification('Magic link sent! Check your email.', 'success');
     
     // Show additional message
     const infoDiv = document.querySelector('.bg-gray-50');
@@ -189,8 +228,9 @@ async function handleLogin(event) {
     console.error('Login error:', error);
     showNotification(error.message || 'Failed to send magic link', 'error');
     
-    // Reset button
+    // Reset button on error so user can try again
     button.disabled = false;
+    button.dataset.submitting = 'false';
     button.textContent = 'Send Magic Link';
   }
 }

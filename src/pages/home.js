@@ -4,6 +4,7 @@ import { getAllQueueItems } from '../modules/db.js';
 import { appState } from '../modules/state.js';
 import { renderBottomNav, getCurrentTheme, toggleTheme, renderThemeToggle, initTheme, applyTheme } from '../modules/theme.js';
 import { hasAdminAccess, signOut } from '../modules/api.js';
+import { showConfirm } from '../components/admin/Modal.js';
 
 /**
  * Render home page
@@ -138,13 +139,17 @@ export async function renderHome(container) {
   
   // Logout button
   document.getElementById('btn-logout').addEventListener('click', async () => {
-    if (confirm('Are you sure you want to logout?')) {
+    const confirmed = await showConfirm('Konfirmasi Keluar', 'Apakah Anda yakin ingin keluar dari aplikasi?', 'Keluar', 'btn btn-danger');
+    if (confirmed) {
       try {
         await signOut();
       } catch (e) {
         // Ignore error if no active session
         console.log('Logout:', e.message);
       }
+      // Explicitly clear app state before navigating
+      appState.set('user', null);
+      appState.set('organization', null);
       router.navigate('login');
     }
   });

@@ -46,6 +46,25 @@ let currentRoute = null;
 let previousRoute = null;
 
 /**
+ * Parse query parameters from hash
+ * @param {string} hash - Full hash including query string
+ * @returns {Object} Parsed query parameters
+ */
+function parseQueryParams(hash) {
+  const params = {};
+  const queryString = hash.split('?')[1];
+  
+  if (queryString) {
+    const searchParams = new URLSearchParams(queryString);
+    searchParams.forEach((value, key) => {
+      params[key] = value;
+    });
+  }
+  
+  return params;
+}
+
+/**
  * Navigate to a route
  */
 export function navigate(routeName, params = {}) {
@@ -78,7 +97,10 @@ export function navigate(routeName, params = {}) {
   route.render(appElement, params);
   
   // Update URL (optional - for PWA without full routing)
-  window.history.pushState({ route: routeName, params }, '', `#${routeName}`);
+  const queryString = Object.keys(params).length > 0 
+    ? '?' + new URLSearchParams(params).toString()
+    : '';
+  window.history.pushState({ route: routeName, params }, '', `#${routeName}${queryString}`);
 }
 
 /**
@@ -117,13 +139,17 @@ export function initRouter() {
   const hash = window.location.hash.slice(1) || 'login';
   const [routeName] = hash.split('?');
   
+  // Parse query parameters
+  const queryParams = parseQueryParams(hash);
+  
   // Note: Auth errors are handled in app.js handleMagicLinkCallback()
   // This is just for regular route navigation
   
   if (routes[routeName]) {
-    navigate(routeName);
+    // Pass query params to route render function
+    navigate(routeName, queryParams);
   } else {
-    navigate('login');
+    navigate('login', queryParams);
   }
 }
 

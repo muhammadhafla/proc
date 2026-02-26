@@ -17,7 +17,7 @@ export function showModal({ title, content, buttons = [], size = 'md' }) {
   }
   
   const overlay = document.createElement('div');
-  overlay.className = 'modal-overlay fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 animate-fade-in';
+  overlay.className = 'modal-overlay fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 animate-fade-in';
   
   const sizes = {
     sm: 'max-w-sm',
@@ -28,14 +28,15 @@ export function showModal({ title, content, buttons = [], size = 'md' }) {
   };
   
   const modal = document.createElement('div');
-  modal.className = `modal-content bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full ${sizes[size]} max-h-[90vh] overflow-hidden flex flex-col`;
+  // Mobile: full width at bottom, desktop: centered
+  modal.className = `modal-content bg-white dark:bg-gray-800 rounded-t-2xl sm:rounded-xl shadow-2xl w-full ${sizes[size]} max-h-[85vh] sm:max-h-[90vh] overflow-hidden flex flex-col`;
   
   // Header
   const header = document.createElement('div');
-  header.className = 'flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-700';
+  header.className = 'flex items-center justify-between px-4 sm:px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex-shrink-0';
   header.innerHTML = `
     <h3 class="text-lg font-semibold text-gray-900 dark:text-white">${title}</h3>
-    <button class="modal-close p-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors" aria-label="Close">
+    <button class="modal-close p-1.5 sm:p-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors" aria-label="Close">
       <svg class="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
       </svg>
@@ -44,20 +45,20 @@ export function showModal({ title, content, buttons = [], size = 'md' }) {
   
   // Body
   const body = document.createElement('div');
-  body.className = 'modal-body flex-1 overflow-y-auto px-6 py-4';
+  body.className = 'modal-body flex-1 overflow-y-auto px-4 sm:px-6 py-4';
   if (typeof content === 'string') {
     body.innerHTML = content;
   } else if (content instanceof HTMLElement) {
     body.appendChild(content);
   }
   
-  // Footer
+  // Footer - stack buttons on mobile
   const footer = document.createElement('div');
-  footer.className = 'flex items-center justify-end gap-3 px-6 py-4 border-t border-gray-200 dark:border-gray-700';
+  footer.className = 'flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-2 sm:gap-3 px-4 sm:px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex-shrink-0';
   
   buttons.forEach(btn => {
     const button = document.createElement('button');
-    button.className = btn.class || 'btn btn-secondary';
+    button.className = btn.class || 'btn btn-secondary w-full sm:w-auto';
     button.textContent = btn.label;
     if (btn.handler) {
       button.addEventListener('click', btn.handler);
@@ -119,9 +120,9 @@ export function closeModal() {
  */
 export function showConfirm(title, message, confirmText = 'Confirm', confirmClass = 'btn btn-danger') {
   return new Promise((resolve) => {
-    const content = `
-      <p class="text-gray-600 dark:text-gray-400">${message}</p>
-    `;
+    const content = document.createElement('p');
+    content.className = 'text-gray-600 dark:text-gray-400';
+    content.textContent = message;
     
     showModal({
       title,
@@ -160,7 +161,7 @@ export function showFormModal({ title, fields, initialData = {}, onSubmit }) {
     const fieldContainer = document.createElement('div');
     
     const label = document.createElement('label');
-    label.className = 'block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1';
+    label.className = 'block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5';
     label.textContent = field.label;
     label.htmlFor = field.id;
     
@@ -169,7 +170,7 @@ export function showFormModal({ title, fields, initialData = {}, onSubmit }) {
     
     if (field.type === 'select') {
       input = document.createElement('select');
-      input.className = 'input';
+      input.className = 'input py-2.5 text-base';
       input.id = field.id;
       input.name = field.name;
       input.required = field.required;
@@ -183,7 +184,7 @@ export function showFormModal({ title, fields, initialData = {}, onSubmit }) {
       });
     } else if (field.type === 'textarea') {
       input = document.createElement('textarea');
-      input.className = 'input min-h-[100px]';
+      input.className = 'input min-h-[100px] py-2.5 text-base';
       input.id = field.id;
       input.name = field.name;
       input.required = field.required;
@@ -191,7 +192,7 @@ export function showFormModal({ title, fields, initialData = {}, onSubmit }) {
       if (field.placeholder) input.placeholder = field.placeholder;
     } else {
       input = document.createElement('input');
-      input.className = 'input';
+      input.className = 'input py-2.5 text-base';
       input.type = field.type || 'text';
       input.id = field.id;
       input.name = field.name;
@@ -212,12 +213,12 @@ export function showFormModal({ title, fields, initialData = {}, onSubmit }) {
     buttons: [
       {
         label: 'Cancel',
-        class: 'btn btn-secondary',
+        class: 'btn btn-secondary w-full sm:w-auto',
         handler: closeModal
       },
       {
         label: 'Save',
-        class: 'btn btn-primary',
+        class: 'btn btn-primary w-full sm:w-auto',
         handler: () => {
           const formData = new FormData(form);
           const data = {};

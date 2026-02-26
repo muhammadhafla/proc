@@ -5,7 +5,7 @@ import { getCurrentUserRole, hasAdminAccess, isOwner,
   adminGetOrganizations, adminCreateOrganization, adminUpdateOrganization, adminDeleteOrganization,
   adminGetUsers, adminCreateUser, adminUpdateUser, adminDeleteUser,
   adminGetSuppliers, adminCreateSupplier, adminUpdateSupplier, adminDeleteSupplier } from '../modules/api.js';
-import { createSidebar, setActiveMenuItem } from '../components/admin/Sidebar.js';
+import { createSidebar, setActiveMenuItem, openSidebar } from '../components/admin/Sidebar.js';
 import { createDataTable } from '../components/admin/DataTable.js';
 import { showFormModal, showConfirm } from '../components/admin/Modal.js';
 import { toastSuccess, toastError } from '../components/admin/Toast.js';
@@ -39,25 +39,34 @@ export function renderAdmin(container) {
     <div class="admin-page min-h-screen bg-gray-50 dark:bg-gray-900 flex">
       <div id="admin-sidebar"></div>
       <main class="flex-1 flex flex-col overflow-hidden">
-        <header class="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 py-4">
+        <header class="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-4 lg:px-6 py-3 lg:py-4">
           <div class="flex items-center justify-between">
-            <div>
-              <h1 class="text-2xl font-bold text-gray-900 dark:text-white" id="section-title">
-                ${isOwner() ? 'Organizations' : 'Suppliers'}
-              </h1>
-              <p class="text-sm text-gray-500 dark:text-gray-400" id="section-subtitle">
-                Manage your ${isOwner() ? 'organizations, users and suppliers' : 'suppliers and staff'}
-              </p>
+            <div class="flex items-center gap-3">
+              <!-- Mobile menu button -->
+              <button id="mobile-menu-btn" class="lg:hidden p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 -ml-2">
+                <svg class="w-6 h-6 text-gray-600 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/>
+                </svg>
+              </button>
+              <div>
+                <h1 class="text-lg lg:text-2xl font-bold text-gray-900 dark:text-white" id="section-title">
+                  ${isOwner() ? 'Organizations' : 'Suppliers'}
+                </h1>
+                <p class="text-xs lg:text-sm text-gray-500 dark:text-gray-400 hidden sm:block" id="section-subtitle">
+                  Manage your ${isOwner() ? 'organizations, users and suppliers' : 'suppliers and staff'}
+                </p>
+              </div>
             </div>
-            <button id="admin-add-btn" class="btn btn-primary">
-              <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <button id="admin-add-btn" class="btn btn-primary text-sm lg:text-base py-2 lg:py-2.5">
+              <svg class="w-4 h-4 lg:w-5 lg:h-5 mr-1.5 lg:mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
               </svg>
-              Add New
+              <span class="hidden sm:inline">Add New</span>
+              <span class="sm:hidden">Add</span>
             </button>
           </div>
         </header>
-        <div id="admin-content" class="flex-1 overflow-auto p-6">
+        <div id="admin-content" class="flex-1 overflow-auto p-4 lg:p-6">
           <!-- Content loaded here -->
         </div>
       </main>
@@ -71,6 +80,11 @@ export function renderAdmin(container) {
   });
   
   document.getElementById('admin-sidebar').appendChild(sidebar);
+  
+  // Mobile menu button handler
+  document.getElementById('mobile-menu-btn')?.addEventListener('click', () => {
+    openSidebar();
+  });
   
   // Set initial section
   currentSection = isOwner() ? 'organizations' : 'suppliers';

@@ -3,10 +3,25 @@ import { onAuthStateChange, getOrganization } from './api.js';
 import { router, routes } from './router.js';
 import { syncEngine } from './sync.js';
 import { appState } from './state.js';
+import {
+  initSessionManager,
+  checkSessionOnMount,
+  setupNavigationGuard,
+  resumeSessionManagement,
+  pauseSessionManagement,
+  forceSessionCheck,
+  logout,
+  getSessionManagerState,
+} from './sessionManager.js';
 
 // Attach to window for backward compatibility
 window.appState = appState;
 window.appRouter = router;
+window.sessionManager = {
+  check: forceSessionCheck,
+  logout: logout,
+  getState: getSessionManagerState,
+};
 
 /**
  * Initialize the application
@@ -19,12 +34,29 @@ export async function initApp() {
   // Listen for auth changes
   onAuthStateChange(handleAuthChange);
   
-  // Check initial session - use getSession to check Supabase session status
-  const { data: { session }, error } = await supabase.auth.getSession();
+  // Initialize session manager
+  await initSessionManager({
+    features: {
+      periodicCheck: true,
+      sensitiveRouteCheck: true,
+      idleDetection: true,
+      multiTabSync: true,
+      warningCountdown: true,
+    },
+  });
   
-  if (session && !error) {
+  // Setup navigation guard for session checks
+  setupNavigationGuard();
+  
+  // Check initial session
+  const sessionInfo = await checkSessionOnMount();
+  
+  if (sessionInfo.isValid) {
     // Session is active, restore state
-    await handleAuthChange('SIGNED_IN', session);
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session) {
+      await handleAuthChange('SIGNED_IN', session);
+    }
   } else {
     // No active session - could be local session but server session expired
     // Clear any cached session
@@ -109,6 +141,9 @@ async function handleAuthChange(event, session) {
   if (event === 'SIGNED_IN' && session) {
     appState.set('user', session.user);
     
+    // Resume session management after login
+    await resumeSessionManagement();
+    
     // Load organization
     try {
       const organization = await getOrganization();
@@ -139,8 +174,22 @@ async function handleAuthChange(event, session) {
     syncEngine.start();
     
     // Navigate to home or stored intended route
+    // Priority: 1. sessionRedirect (from session expiry), 2. intendedRoute (from auth guard), 3. home
+    const sessionRedirect = sessionStorage.getItem('sessionRedirect');
     const intendedRoute = sessionStorage.getItem('intendedRoute');
-    if (intendedRoute && routes[intendedRoute]) {
+    
+    if (sessionRedirect) {
+      // Clear the redirect param
+      sessionStorage.removeItem('sessionRedirect');
+      
+      // Navigate to the original page user was on before session expired
+      if (routes[sessionRedirect]) {
+        console.log('[SessionManager] Redirecting to:', sessionRedirect);
+        router.navigate(sessionRedirect);
+      } else {
+        router.navigate('home');
+      }
+    } else if (intendedRoute && routes[intendedRoute]) {
       sessionStorage.removeItem('intendedRoute');
       router.navigate(intendedRoute);
     } else {
@@ -149,6 +198,9 @@ async function handleAuthChange(event, session) {
   } else if (event === 'SIGNED_OUT') {
     appState.set('user', null);
     appState.set('organization', null);
+    
+    // Pause session management on logout
+    pauseSessionManagement();
     
     // Stop sync engine
     syncEngine.stop();
