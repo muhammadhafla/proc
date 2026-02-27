@@ -17,6 +17,7 @@ import {
   getSessionState,
   withSessionCheck,
   getSessionConfig,
+  isSensitiveRoute,
 } from '../services/sessionService.js';
 
 import { showSessionExpiredModal, hideSessionExpiredModal, isSessionExpiredModalVisible } from '../components/session/SessionExpiredModal.js';
@@ -338,9 +339,7 @@ async function checkSessionOnNavigation(routeName) {
   if (!SESSION_MANAGER_CONFIG.features.sensitiveRouteCheck) {
     return true;
   }
-  
-  const { isSensitiveRoute } = await import('../services/sessionService.js');
-  
+
   // Check if route is sensitive
   if (isSensitiveRoute(routeName)) {
     const sessionInfo = await checkSession();

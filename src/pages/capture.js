@@ -238,9 +238,29 @@ function setupSupplierDropdown() {
     
     try {
       // Try to fetch from server if online
-      if (window.appState?.get('isOnline') && window.appState?.get('organization')?.id) {
+      // First get organization ID with fallback
+      let organizationId = window.appState?.get('organization')?.id;
+      
+      // Try localStorage fallback if not in appState
+      if (!organizationId && typeof localStorage !== 'undefined') {
         try {
-          const serverSuppliers = await fetchSuppliers(window.appState.get('organization').id);
+          const storedOrg = localStorage.getItem('organization');
+          if (storedOrg) {
+            const org = JSON.parse(storedOrg);
+            organizationId = org?.id;
+            // Update appState with stored org
+            if (organizationId && window.appState) {
+              window.appState.set('organization', org);
+            }
+          }
+        } catch (e) {
+          console.warn('Failed to parse stored organization:', e);
+        }
+      }
+      
+      if (window.appState?.get('isOnline') && organizationId) {
+        try {
+          const serverSuppliers = await fetchSuppliers(organizationId);
           if (serverSuppliers && serverSuppliers.length > 0) {
             // Cache to IndexedDB
             await cacheSuppliers(serverSuppliers);

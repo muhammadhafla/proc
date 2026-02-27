@@ -121,8 +121,28 @@ async function loadSupplierFilter() {
   
   try {
     // Fetch from server if online
-    if (appState.get('isOnline') && appState.get('organization')?.id) {
-      const serverSuppliers = await fetchSuppliers(appState.get('organization').id);
+    // First get organization ID with fallback
+    let organizationId = appState.get('organization')?.id;
+    
+    // Try localStorage fallback if not in appState
+    if (!organizationId && typeof localStorage !== 'undefined') {
+      try {
+        const storedOrg = localStorage.getItem('organization');
+        if (storedOrg) {
+          const org = JSON.parse(storedOrg);
+          organizationId = org?.id;
+          // Update appState with stored org
+          if (organizationId) {
+            appState.set('organization', org);
+          }
+        }
+      } catch (e) {
+        console.warn('Failed to parse stored organization:', e);
+      }
+    }
+    
+    if (appState.get('isOnline') && organizationId) {
+      const serverSuppliers = await fetchSuppliers(organizationId);
       serverSuppliers.forEach(s => {
         addSupplierOption(select, s.id, s.name);
         supplierIds.add(s.id);

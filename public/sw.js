@@ -1,7 +1,7 @@
 // Procurement System - Service Worker (Simplified for Online-Only)
 // Only caches static assets, no offline API support
 
-const CACHE_NAME = 'procurement-v3';
+const CACHE_NAME = 'procurement-v4';
 const ASSETS = [
   '/',
   '/index.html',
@@ -34,6 +34,7 @@ self.addEventListener('fetch', (event) => {
   if (isExternal) {
     return; // Let the browser handle external requests natively
   }
+  
   // For navigation requests (HTML pages), try network first
   if (isNavigation) {
     event.respondWith(
@@ -45,15 +46,10 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // For other requests (assets), use cache-first strategy
+  // For other requests (assets), use network-first strategy with fallback
   event.respondWith(
-    caches.match(event.request).then((response) => {
-      if (response) {
-        return response;
-      }
-      
-      // Not in cache, fetch from network
-      return fetch(event.request).then((networkResponse) => {
+    fetch(event.request)
+      .then((networkResponse) => {
         // Cache successful responses for assets
         if (networkResponse && networkResponse.status === 200) {
           const responseClone = networkResponse.clone();
@@ -62,8 +58,21 @@ self.addEventListener('fetch', (event) => {
           });
         }
         return networkResponse;
-      });
-    })
+      })
+      .catch(() => {
+        // If network fails, try cache
+        return caches.match(event.request).then((cachedResponse) => {
+          if (cachedResponse) {
+            return cachedResponse;
+          }
+          // If no cache, return a fallback for CSS/JS
+          if (event.request.url.includes('.css')) {
+            return new Response('', { status: 200, statusText: 'OK' });
+          }
+          // For other assets, just let it fail
+          return new Response('Asset not available', { status: 404 });
+        });
+      })
   );
 });
 

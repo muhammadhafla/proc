@@ -49,7 +49,36 @@ export async function getOrCreateSupplier(name) {
   const supplierId = uuidv4();
   
   try {
-    const organizationId = window.appState.get('organization')?.id;
+    // Try to get organization from appState first, then localStorage as fallback
+    let organizationId = window.appState.get('organization')?.id;
+    
+    // If not in appState, try localStorage
+    if (!organizationId) {
+      try {
+        const storedOrg = localStorage.getItem('organization');
+        if (storedOrg) {
+          const org = JSON.parse(storedOrg);
+          organizationId = org?.id;
+        }
+      } catch (e) {
+        console.warn('Failed to parse stored organization:', e);
+      }
+    }
+    
+    // If still no organization, try to fetch it
+    if (!organizationId) {
+      console.warn('No organization in state, attempting to refresh...');
+      const { getOrganization } = await import('./api.js');
+      const org = await getOrganization();
+      organizationId = org?.id;
+      
+      // Update appState with fresh organization
+      if (organizationId) {
+        window.appState.set('organization', org);
+        localStorage.setItem('organization', JSON.stringify(org));
+      }
+    }
+    
     if (!organizationId) {
       throw new Error('No organization found. Please sign out and sign in again.');
     }
@@ -109,7 +138,36 @@ export async function getOrCreateModel(name) {
   const modelId = uuidv4();
   
   try {
-    const organizationId = window.appState.get('organization')?.id;
+    // Try to get organization from appState first, then localStorage as fallback
+    let organizationId = window.appState.get('organization')?.id;
+    
+    // If not in appState, try localStorage
+    if (!organizationId) {
+      try {
+        const storedOrg = localStorage.getItem('organization');
+        if (storedOrg) {
+          const org = JSON.parse(storedOrg);
+          organizationId = org?.id;
+        }
+      } catch (e) {
+        console.warn('Failed to parse stored organization:', e);
+      }
+    }
+    
+    // If still no organization, try to fetch it
+    if (!organizationId) {
+      console.warn('No organization in state, attempting to refresh...');
+      const { getOrganization } = await import('./api.js');
+      const org = await getOrganization();
+      organizationId = org?.id;
+      
+      // Update appState with fresh organization
+      if (organizationId) {
+        window.appState.set('organization', org);
+        localStorage.setItem('organization', JSON.stringify(org));
+      }
+    }
+    
     if (!organizationId) {
       throw new Error('No organization found. Please sign out and sign in again.');
     }

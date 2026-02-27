@@ -119,32 +119,57 @@ BEGIN
     RETURN;
   END IF;
 
-  -- Get the most recent active session for this user
-  SELECT s.id, s.expires_at
-  INTO v_session_id, v_expires_at
-  FROM auth.sessions s
-  WHERE s.user_id = v_user_id
-    AND s.expires_at > v_now
-  ORDER BY s.created_at DESC
-  LIMIT 1;
-
-  IF v_session_id IS NULL THEN
+  -- Hybrid approach: Check JWT expiry first for performance,
+  -- then verify session exists in auth.sessions for security
+  -- (catches session revocation by admin)
+  BEGIN
+    v_expires_at := to_timestamp((v_claims::json->>'exp')::bigint);
+  EXCEPTION WHEN OTHERS THEN
+    -- If JWT parsing fails, return false
     RETURN QUERY SELECT false, v_user_id, NULL, NULL, NULL, NULL;
+    RETURN;
+  END;
+
+  -- Check if token is still valid based on JWT expiry
+  IF v_expires_at IS NOT NULL AND v_expires_at > v_now THEN
+    -- JWT is valid, now verify session still exists in auth.sessions
+    -- This catches cases where session was revoked (admin logout, password change, etc.)
+    SELECT s.id, s.expires_at
+    INTO v_session_id, v_expires_at
+    FROM auth.sessions s
+    WHERE s.user_id = v_user_id
+      AND s.expires_at > v_now
+    ORDER BY s.created_at DESC
+    LIMIT 1;
+
+    -- If no active session found in database, token was revoked
+    IF v_session_id IS NULL THEN
+      RETURN QUERY SELECT false, v_user_id, NULL, NULL, NULL, NULL;
+      RETURN;
+    END IF;
+
+    -- Session is valid - get user email
+    SELECT email INTO v_email FROM auth.users WHERE id = v_user_id;
+
+    RETURN QUERY SELECT 
+      true,
+      v_user_id,
+      v_email,
+      v_expires_at,
+      EXTRACT(EPOCH FROM (v_expires_at - v_now))::bigint,
+      v_now;
     RETURN;
   END IF;
 
-  -- Get user email
-  SELECT email INTO v_email FROM auth.users WHERE id = v_user_id;
-
-  RETURN QUERY SELECT 
-    true,
-    v_user_id,
-    v_email,
-    v_expires_at,
-    EXTRACT(EPOCH FROM (v_expires_at - v_now))::bigint,
-    v_now;
+  -- JWT expired - return false
+  RETURN QUERY SELECT false, v_user_id, NULL, NULL, NULL, NULL;
 END;
 $$;
+
+-- Grant access to auth schema tables for session validation
+-- These grants are needed by get_session_status() to query auth.sessions
+GRANT SELECT ON auth.sessions TO authenticated;
+GRANT SELECT ON auth.users TO authenticated;
 
 -- Function to terminate all sessions for a user (except current if specified)
 DROP FUNCTION IF EXISTS public.terminate_all_sessions(uuid, uuid);

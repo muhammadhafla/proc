@@ -328,12 +328,17 @@ CREATE POLICY "org_select_same_org" ON public.organizations
     (select auth.role()) = 'service_role'
   );
 
--- Organizations: Only owner or super_admin can insert
+-- Organizations: Only owner can insert (owner of existing org OR user with owner role can create new org)
 CREATE POLICY "org_insert_owner_or_super" ON public.organizations
   FOR INSERT WITH CHECK (
-    (get_user_role_in_org((select auth.jwt() -> 'app_metadata' ->> 'organization_id')::uuid) = 'owner') OR
-    (select auth.jwt() -> 'app_metadata' ->> 'role') = 'super_admin' OR
-    (select auth.role()) = 'service_role'
+    -- Allow if user has owner role in their metadata (can create new org)
+    ((select auth.jwt() -> 'app_metadata' ->> 'role') = 'owner') OR
+    -- Allow if user has super_admin role
+    ((select auth.jwt() -> 'app_metadata' ->> 'role') = 'super_admin') OR
+    -- Allow service_role
+    ((select auth.role()) = 'service_role') OR
+    -- Allow if user is owner of ANY organization (for multi-org owners)
+    (EXISTS (SELECT 1 FROM public.users u WHERE u.id = (select auth.uid()) AND u.role = 'owner'))
   );
 
 -- Organizations: Only owner or super_admin can update
