@@ -116,6 +116,9 @@ CREATE INDEX IF NOT EXISTS idx_procurement_supplier ON public.procurement(suppli
 CREATE INDEX IF NOT EXISTS idx_procurement_model ON public.procurement(model_id);
 CREATE INDEX IF NOT EXISTS idx_procurement_captured_at ON public.procurement(captured_at DESC);
 
+-- Index for batch queries (added per code review)
+CREATE INDEX IF NOT EXISTS idx_procurement_batch ON public.procurement(batch_id);
+
 -- Composite indexes for analytics
 CREATE INDEX IF NOT EXISTS idx_procurement_org_supplier ON public.procurement(organization_id, supplier_id);
 CREATE INDEX IF NOT EXISTS idx_procurement_org_model ON public.procurement(organization_id, model_id);

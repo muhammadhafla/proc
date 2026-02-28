@@ -1,16 +1,64 @@
 // Cloudflare Worker - Signed URL Generator
 // Deploy to Cloudflare Workers
 
+// Get allowed origin from environment
+const ALLOWED_ORIGIN = env.ALLOWED_ORIGIN || '';
+
+// Determine CORS origin - empty means same-origin only
+const CORS_ORIGIN = ALLOWED_ORIGIN === '*' || !ALLOWED_ORIGIN 
+  ? ''  // Let browser enforce same-origin
+  : ALLOWED_ORIGIN;
+
+/**
+ * Check if origin is allowed
+ */
+function isOriginAllowed(origin) {
+  if (!CORS_ORIGIN) return true; // Same-origin only
+  if (!origin) return false;
+  
+  // Support multiple origins (comma-separated)
+  return CORS_ORIGIN.split(',').some(allowed => 
+    allowed.trim() === origin || allowed.trim() === '*'
+  );
+}
+
+/**
+ * Get CORS headers based on allowed origin
+ */
+function getCorsHeaders(origin) {
+  const allowedOrigin = CORS_ORIGIN || origin || '';
+  return {
+    'Access-Control-Allow-Origin': allowedOrigin,
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+  };
+}
+
 export default {
   async fetch(request, env, ctx) {
     // Handle CORS preflight
     if (request.method === 'OPTIONS') {
+      const origin = request.headers.get('Origin') || '';
+      
+      // Validate origin on preflight
+      if (!isOriginAllowed(origin)) {
+        return new Response('Origin not allowed', { 
+          status: 403,
+          headers: { 'Content-Type': 'text/plain' }
+        });
+      }
+      
       return new Response(null, {
-        headers: {
-          'Access-Control-Allow-Origin': process.env.ALLOWED_ORIGIN || '*',
-          'Access-Control-Allow-Methods': 'POST, OPTIONS',
-          'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-        },
+        headers: getCorsHeaders(origin),
+      });
+    }
+
+    // Validate origin on actual request
+    const origin = request.headers.get('Origin') || '';
+    if (!isOriginAllowed(origin)) {
+      return new Response('Origin not allowed', { 
+        status: 403,
+        headers: { 'Content-Type': 'text/plain' }
       });
     }
 
@@ -25,7 +73,7 @@ export default {
       if (!authHeader || !authHeader.startsWith('Bearer ')) {
         return new Response(JSON.stringify({ error: 'Missing or invalid authorization header' }), {
           status: 401,
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...getCorsHeaders(origin) },
         });
       }
 
@@ -36,7 +84,7 @@ export default {
       if (!user) {
         return new Response(JSON.stringify({ error: 'Invalid or expired token' }), {
           status: 401,
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...getCorsHeaders(origin) },
         });
       }
 
@@ -45,7 +93,7 @@ export default {
       if (!organizationId) {
         return new Response(JSON.stringify({ error: 'User has no organization' }), {
           status: 403,
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...getCorsHeaders(origin) },
         });
       }
 
@@ -53,16 +101,16 @@ export default {
       
       // Route based on path
       if (url.pathname === '/upload') {
-        return handleUpload(request, env, organizationId);
+        return handleUpload(request, env, organizationId, origin);
       } else if (url.pathname === '/download') {
-        return handleDownload(request, env, organizationId);
+        return handleDownload(request, env, organizationId, origin);
       } else {
         return new Response('Not found', { status: 404 });
       }
     } catch (error) {
       return new Response(JSON.stringify({ error: error.message }), {
         status: 500,
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...getCorsHeaders(origin) },
       });
     }
   },
@@ -94,14 +142,14 @@ async function verifySupabaseToken(token, env) {
 
 // ==================== Upload Handler ====================
 
-async function handleUpload(request, env, userOrganizationId) {
+async function handleUpload(request, env, userOrganizationId, origin) {
   const body = await request.json();
   const { organization_id, file_name, content_type } = body;
 
   if (!organization_id || !file_name) {
     return new Response(
       JSON.stringify({ error: 'Missing required fields' }),
-      { status: 400, headers: { 'Content-Type': 'application/json' } }
+      { status: 400, headers: { 'Content-Type': 'application/json', ...getCorsHeaders(origin) } }
     );
   }
 
@@ -109,7 +157,7 @@ async function handleUpload(request, env, userOrganizationId) {
   if (organization_id !== userOrganizationId) {
     return new Response(
       JSON.stringify({ error: 'Unauthorized: Organization mismatch' }),
-      { status: 403, headers: { 'Content-Type': 'application/json' } }
+      { status: 403, headers: { 'Content-Type': 'application/json', ...getCorsHeaders(origin) } }
     );
   }
 
@@ -131,7 +179,7 @@ async function handleUpload(request, env, userOrganizationId) {
     {
       headers: {
         'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': process.env.ALLOWED_ORIGIN || '*',
+        ...getCorsHeaders(origin),
       },
     }
   );
@@ -139,14 +187,14 @@ async function handleUpload(request, env, userOrganizationId) {
 
 // ==================== Download Handler ====================
 
-async function handleDownload(request, env, userOrganizationId) {
+async function handleDownload(request, env, userOrganizationId, origin) {
   const body = await request.json();
   const { storage_path } = body;
 
   if (!storage_path) {
     return new Response(
       JSON.stringify({ error: 'Missing storage_path' }),
-      { status: 400, headers: { 'Content-Type': 'application/json' } }
+      { status: 400, headers: { 'Content-Type': 'application/json', ...getCorsHeaders(origin) } }
     );
   }
 
@@ -154,7 +202,7 @@ async function handleDownload(request, env, userOrganizationId) {
   if (storage_path.includes('..') || storage_path.startsWith('/')) {
     return new Response(
       JSON.stringify({ error: 'Invalid path' }),
-      { status: 400, headers: { 'Content-Type': 'application/json' } }
+      { status: 400, headers: { 'Content-Type': 'application/json', ...getCorsHeaders(origin) } }
     );
   }
 
@@ -163,7 +211,7 @@ async function handleDownload(request, env, userOrganizationId) {
   if (pathOrganizationId !== userOrganizationId) {
     return new Response(
       JSON.stringify({ error: 'Unauthorized: Cannot access other organization files' }),
-      { status: 403, headers: { 'Content-Type': 'application/json' } }
+      { status: 403, headers: { 'Content-Type': 'application/json', ...getCorsHeaders(origin) } }
     );
   }
 
@@ -178,7 +226,7 @@ async function handleDownload(request, env, userOrganizationId) {
     {
       headers: {
         'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': process.env.ALLOWED_ORIGIN || '*',
+        ...getCorsHeaders(origin),
       },
     }
   );

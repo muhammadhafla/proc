@@ -4,6 +4,7 @@
 import { supabase } from '../modules/api.js';
 import { appState } from '../modules/state.js';
 import { router } from '../modules/router.js';
+import { setSecure, removeSecure, getSecure } from '../utils/storage.js';
 
 // Session configuration
 const SESSION_CONFIG = {
@@ -22,6 +23,9 @@ const SESSION_CONFIG = {
   
   // Percentage of session lifetime to trigger periodic check (default: 50%)
   checkThresholdPercent: 50,
+  
+  // Token refresh - refresh 5 minutes before expiry
+  tokenRefreshBuffer: 5 * 60 * 1000,
   
   // Sensitive routes that require session validation
   sensitiveRoutes: ['admin', 'payment', 'settings', 'account'],
@@ -43,6 +47,7 @@ let sessionState = {
 let sessionCheckTimer = null;
 let sessionWarningTimer = null;
 let idleTimer = null;
+let refreshTimer = null;
 let lastActivityTime = Date.now();
 
 // Event listeners storage
@@ -114,10 +119,10 @@ function broadcastSessionEvent(type, data) {
     broadcastChannel.postMessage({ type, data });
   }
   
-  // Also use localStorage for broader compatibility
-  localStorage.setItem('session_action', JSON.stringify({ type, data }));
+  // Also use secure storage for broader compatibility
+  setSecure('session_action', { type, data });
   // Clear immediately after to avoid re-triggering
-  setTimeout(() => localStorage.removeItem('session_action'), 100);
+  setTimeout(() => removeSecure('session_action'), 100);
 }
 
 // Handle session expired from another tab
@@ -136,6 +141,64 @@ function handleSessionRefreshedFromOtherTab(data) {
     sessionState.expiresInSeconds = data.expiresInSeconds;
     sessionState.isValid = true;
     emitEvent('sessionRefreshed', data);
+  }
+}
+
+// ==================== Proactive Token Refresh ====================
+
+/**
+ * Schedule proactive token refresh before expiry
+ * @param {number} expiresInSeconds - Token expiry time in seconds
+ */
+function scheduleTokenRefresh(expiresInSeconds) {
+  // Clear any existing timer
+  if (refreshTimer) {
+    clearTimeout(refreshTimer);
+    refreshTimer = null;
+  }
+  
+  // Calculate refresh time - 5 minutes before expiry
+  const refreshBufferMs = SESSION_CONFIG.tokenRefreshBuffer;
+  const expiresInMs = expiresInSeconds * 1000;
+  const refreshTimeMs = expiresInMs - refreshBufferMs;
+  
+  // Only schedule if we have enough time (> 1 minute)
+  if (refreshTimeMs > 60000) {
+    console.log(`[SessionService] Scheduling proactive token refresh in ${Math.round(refreshTimeMs / 60000)} minutes`);
+    
+    refreshTimer = setTimeout(async () => {
+      try {
+        console.log('[SessionService] Running proactive token refresh...');
+        const { data, error } = await supabase.auth.refreshSession();
+        
+        if (error) {
+          console.warn('[SessionService] Proactive token refresh failed:', error.message);
+          // Retry once after 30 seconds
+          setTimeout(() => scheduleTokenRefresh(expiresInSeconds), 30000);
+          return;
+        }
+        
+        if (data.session) {
+          console.log('[SessionService] Proactive token refresh successful');
+          // Schedule next refresh
+          scheduleTokenRefresh(data.session.expires_in);
+        }
+      } catch (e) {
+        console.warn('[SessionService] Proactive token refresh error:', e);
+      }
+    }, refreshTimeMs);
+  } else {
+    console.log('[SessionService] Token expires too soon, skipping proactive refresh');
+  }
+}
+
+/**
+ * Clear the proactive refresh timer
+ */
+function clearRefreshTimer() {
+  if (refreshTimer) {
+    clearTimeout(refreshTimer);
+    refreshTimer = null;
   }
 }
 
@@ -382,6 +445,9 @@ export async function checkSession() {
         expiresAt: sessionState.expiresAt,
         expiresInSeconds: sessionState.expiresInSeconds,
       });
+      
+      // Schedule proactive token refresh
+      scheduleTokenRefresh(sessionState.expiresInSeconds);
     }
     
     // Emit events
@@ -423,6 +489,9 @@ export async function refreshSession() {
       sessionState.expiresAt = new Date(data.session.expires_at * 1000);
       sessionState.expiresInSeconds = data.session.expires_in;
       
+      // Schedule proactive token refresh after manual refresh
+      scheduleTokenRefresh(data.session.expires_in);
+      
       emitEvent('sessionRefreshed', sessionState);
       return { success: true, session: data.session };
     }
@@ -436,6 +505,7 @@ export async function refreshSession() {
 // Terminate session (logout)
 export async function terminateSession(terminateAll = false) {
   clearAllTimers();
+  clearRefreshTimer();
   
   try {
     if (terminateAll && sessionState.userId) {

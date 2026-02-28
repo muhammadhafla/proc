@@ -35,6 +35,9 @@ export async function signInWithEmail(email) {
  * Sign out
  */
 export async function signOut() {
+  // Clear user cache first
+  clearUserCache();
+  
   const { error } = await supabase.auth.signOut();
   if (error) throw error;
 }

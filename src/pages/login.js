@@ -149,7 +149,7 @@ export function renderLogin(container, params = {}) {
         
         <!-- Offline Notice -->
         <p class="text-center text-sm ${isDark ? 'text-gray-500' : 'text-gray-500'} mt-6">
-          Works offline • Syncs automatically
+          Works Smart • Syncs automatically
         </p>
       </div>
     </div>

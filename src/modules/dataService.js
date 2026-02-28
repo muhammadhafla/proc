@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { getSupplierByName, getModelByName, cacheSuppliers, cacheModels } from './db.js';
 import { createSupplier, createModel } from './api.js';
 import { addToQueue, isOnline } from './uploadQueue.js';
+import { getSecure, setSecure } from '../utils/storage.js';
 
 /**
  * Wrap a promise with a timeout
@@ -52,16 +53,11 @@ export async function getOrCreateSupplier(name) {
     // Try to get organization from appState first, then localStorage as fallback
     let organizationId = window.appState.get('organization')?.id;
     
-    // If not in appState, try localStorage
+    // If not in appState, try secure storage
     if (!organizationId) {
-      try {
-        const storedOrg = localStorage.getItem('organization');
-        if (storedOrg) {
-          const org = JSON.parse(storedOrg);
-          organizationId = org?.id;
-        }
-      } catch (e) {
-        console.warn('Failed to parse stored organization:', e);
+      const storedOrg = getSecure('organization');
+      if (storedOrg) {
+        organizationId = storedOrg?.id;
       }
     }
     
@@ -75,7 +71,7 @@ export async function getOrCreateSupplier(name) {
       // Update appState with fresh organization
       if (organizationId) {
         window.appState.set('organization', org);
-        localStorage.setItem('organization', JSON.stringify(org));
+        setSecure('organization', org);
       }
     }
     
@@ -141,16 +137,11 @@ export async function getOrCreateModel(name) {
     // Try to get organization from appState first, then localStorage as fallback
     let organizationId = window.appState.get('organization')?.id;
     
-    // If not in appState, try localStorage
+    // If not in appState, try secure storage
     if (!organizationId) {
-      try {
-        const storedOrg = localStorage.getItem('organization');
-        if (storedOrg) {
-          const org = JSON.parse(storedOrg);
-          organizationId = org?.id;
-        }
-      } catch (e) {
-        console.warn('Failed to parse stored organization:', e);
+      const storedOrg = getSecure('organization');
+      if (storedOrg) {
+        organizationId = storedOrg?.id;
       }
     }
     
@@ -164,7 +155,7 @@ export async function getOrCreateModel(name) {
       // Update appState with fresh organization
       if (organizationId) {
         window.appState.set('organization', org);
-        localStorage.setItem('organization', JSON.stringify(org));
+        setSecure('organization', org);
       }
     }
     

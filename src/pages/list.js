@@ -5,6 +5,7 @@ import { fetchProcurements, fetchSuppliers } from '../modules/api.js';
 import { formatCurrency, formatDate } from '../modules/app.js';
 import { appState } from '../modules/state.js';
 import { renderBottomNav } from '../modules/theme.js';
+import { debounce } from '../utils/debounce.js';
 
 /**
  * Render list page
@@ -298,17 +299,6 @@ function renderListItems() {
   } else {
     loadMore.classList.add('hidden');
   }
-}
-
-/**
- * Debounce helper
- */
-function debounce(fn, delay) {
-  let timeout;
-  return (...args) => {
-    clearTimeout(timeout);
-    timeout = setTimeout(() => fn(...args), delay);
-  };
 }
 
 /**

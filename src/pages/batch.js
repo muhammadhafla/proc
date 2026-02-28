@@ -5,6 +5,7 @@ import { showNotification } from '../modules/app.js';
 import { v4 as uuidv4 } from 'uuid';
 import { initCamera, captureImage as captureImageFromModule, cleanupCamera, revokeAllBlobUrls, createBlobUrl, revokeBlobUrl } from '../modules/camera.js';
 import { getOrCreateSupplier, saveProcurementItem } from '../modules/dataService.js';
+import { debounce } from '../utils/debounce.js';
 
 // Set up navigation cleanup for blob URLs
 window.addEventListener('hashchange', () => {
@@ -152,17 +153,6 @@ async function initBatchCapture() {
   
   // Start camera
   await startCamera();
-}
-
-/**
- * Debounce helper
- */
-function debounce(fn, delay) {
-  let timeout;
-  return (...args) => {
-    clearTimeout(timeout);
-    timeout = setTimeout(() => fn(...args), delay);
-  };
 }
 
 /**

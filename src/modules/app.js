@@ -3,6 +3,7 @@ import { onAuthStateChange, getOrganization } from './api.js';
 import { router, routes } from './router.js';
 import { syncEngine } from './sync.js';
 import { appState } from './state.js';
+import { setSecure, removeSecure, getSecure } from '../utils/storage.js';
 import {
   initSessionManager,
   checkSessionOnMount,
@@ -140,8 +141,8 @@ async function handleMagicLinkCallback() {
 async function handleAuthChange(event, session) {
   if (event === 'SIGNED_IN' && session) {
     appState.set('user', session.user);
-    // Also persist to localStorage for fallback
-    localStorage.setItem('user', JSON.stringify(session.user));
+    // Use secure storage (sessionStorage) instead of localStorage for XSS protection
+    setSecure('user', session.user);
     
     // Resume session management after login
     await resumeSessionManagement();
@@ -151,8 +152,8 @@ async function handleAuthChange(event, session) {
       const organization = await getOrganization();
       if (organization) {
         appState.set('organization', organization);
-        // Also persist to localStorage for fallback
-        localStorage.setItem('organization', JSON.stringify(organization));
+        // Use secure storage (sessionStorage) instead of localStorage
+        setSecure('organization', organization);
         console.log('User logged in:', session.user.email, '| Org:', organization.name, '| Role:', organization.userRole);
       }
     } catch (error) {
@@ -203,9 +204,9 @@ async function handleAuthChange(event, session) {
     appState.set('user', null);
     appState.set('organization', null);
     
-    // Clear localStorage backup
-    localStorage.removeItem('user');
-    localStorage.removeItem('organization');
+    // Clear secure storage on logout
+    removeSecure('user');
+    removeSecure('organization');
     
     // Pause session management on logout
     pauseSessionManagement();

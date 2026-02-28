@@ -5,7 +5,7 @@
 import { openDB } from 'idb';
 
 const DB_NAME = 'procurement-db';
-const DB_VERSION = 2;
+const DB_VERSION = 1;
 
 let dbPromise = null;
 
@@ -20,14 +20,6 @@ export async function initDB() {
   dbPromise = openDB(DB_NAME, DB_VERSION, {
     upgrade(db, oldVersion, _newVersion, _transaction) {
       console.log('[DB] Running upgrade, old version:', oldVersion, '-> new:', DB_VERSION);
-      // Migration logic for version 2: Add settings store
-      if (oldVersion < 2) {
-        // Add settings store for app configuration
-        if (!db.objectStoreNames.contains('settings')) {
-          const settingsStore = db.createObjectStore('settings', { keyPath: 'key' });
-          settingsStore.createIndex('category', 'category');
-        }
-      }
       
       // Initial schema setup (version 1)
       if (!db.objectStoreNames.contains('uploadQueue')) {
@@ -186,29 +178,11 @@ export async function getProcurements(limit = 20, offset = 0) {
 }
 
 /**
- * Get total count of procurements (for pagination UI)
- */
-export async function getProcurementsCount() {
-  const db = await getDB();
-  return db.count('procurements');
-}
-
-/**
  * Get procurement by ID
  */
 export async function getProcurement(id) {
   const db = await getDB();
   return db.get('procurements', id);
-}
-
-/**
- * Search procurements by supplier
- */
-export async function getProcurementsBySupplier(supplierId) {
-  const db = await getDB();
-  const tx = db.transaction('procurements', 'readonly');
-  const index = tx.store.index('supplierId');
-  return index.getAll(supplierId);
 }
 
 // ==================== Supplier Operations ====================
@@ -309,17 +283,6 @@ export async function getSupplierByName(normalizedName) {
   return null;
 }
 
-/**
- * Add a new supplier locally
- */
-export async function addSupplier(supplier) {
-  const db = await getDB();
-  return db.put('suppliers', {
-    ...supplier,
-    created_at: new Date().toISOString(),
-  });
-}
-
 // ==================== Model Operations ====================
 
 /**
@@ -410,29 +373,4 @@ export async function getModelByName(normalizedName) {
     return cursor.value;
   }
   return null;
-}
-
-/**
- * Add a new model locally
- */
-export async function addModel(model) {
-  const db = await getDB();
-  return db.put('models', {
-    ...model,
-    first_seen: new Date().toISOString(),
-    created_at: new Date().toISOString(),
-  });
-}
-
-/**
- * Search models by name (normalized)
- */
-export async function searchModels(query) {
-  const models = await getModels();
-  const normalizedQuery = query.toLowerCase().trim();
-  
-  return models.filter(model => 
-    model.name.toLowerCase().includes(normalizedQuery) ||
-    model.normalized_name?.includes(normalizedQuery)
-  );
 }
